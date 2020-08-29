@@ -40,9 +40,15 @@ pub enum Error {
     Ed25519(ed25519::SignatureError),
     #[cfg_attr(feature = "thiserror", error("invalid value"))]
     InvalidValue,
-    #[cfg_attr(feature = "thiserror", error("invalid length (max={max}, actual={actual})"))]
+    #[cfg_attr(
+        feature = "thiserror",
+        error("invalid length (max={max}, actual={actual})")
+    )]
     MaxLen { max: usize, actual: usize },
-    #[cfg_attr(feature = "thiserror", error("invalid length (min={min}, actual={actual})"))]
+    #[cfg_attr(
+        feature = "thiserror",
+        error("invalid length (min={min}, actual={actual})")
+    )]
     MinLen { min: usize, actual: usize },
     #[cfg(feature = "sparse")]
     #[cfg_attr(feature = "thiserror", error("sp4r53-related error ({0})"))]
@@ -52,36 +58,38 @@ pub enum Error {
 // ======================================== macro_rules! ======================================== \\
 
 macro_rules! assert_min_len {
-    ($buf:ident, $min:expr) => {
-        {
-            let min = $min;
-            if $buf.len() < min {
-                return Err(Error::MinLen { min, actual: $buf.len() }.into());
+    ($buf:ident, $min:expr) => {{
+        let min = $min;
+        if $buf.len() < min {
+            return Err(Error::MinLen {
+                min,
+                actual: $buf.len(),
             }
+            .into());
         }
-    };
+    }};
 }
 
 macro_rules! encode_len {
-    ($buf:ident, $len:expr) => {
-        {
-            let len = $len;
-            if len > u16::MAX as usize {
-                return Err(Error::MaxLen { max: u16::MAX as usize, actual: len }.into());
+    ($buf:ident, $len:expr) => {{
+        let len = $len;
+        if len > u16::MAX as usize {
+            return Err(Error::MaxLen {
+                max: u16::MAX as usize,
+                actual: len,
             }
-
-            (len as u16).encode($buf)?
+            .into());
         }
-    };
+
+        (len as u16).encode($buf)?
+    }};
 }
 
 macro_rules! decode_len {
-    ($buf:ident) => {
-        {
-            let (len, buf) = u16::decode($buf)?;
-            (len as usize, buf)
-        }
-    };
+    ($buf:ident) => {{
+        let (len, buf) = u16::decode($buf)?;
+        (len as usize, buf)
+    }};
 }
 
 macro_rules! primitive {
@@ -360,7 +368,7 @@ impl<'buf> Decode<'buf> for sparse::Proof {
 
     fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
         let (bytes, rest) = <&[u8]>::decode(buf)?;
-       
+
         Ok((Self::from_bytes(bytes)?, rest))
     }
 }
