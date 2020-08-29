@@ -9,6 +9,8 @@
 // =========================================== Imports ========================================== \\
 
 use core::mem;
+
+#[cfg(feature = "pow")]
 use std::collections::BTreeMap;
 
 #[cfg(feature = "thiserror")]
@@ -31,8 +33,15 @@ pub type Result<T> = core::result::Result<T, Error>;
 #[derive(Debug)]
 #[cfg_attr(feature = "thiserror", derive(Error))]
 pub enum Error {
+    #[cfg(feature = "ed25519")]
+    #[cfg_attr(feature = "thiserror", error("ed25519-related error ({0})"))]
+    Ed25519(ed25519::SignatureError),
+    #[cfg_attr(feature = "thiserror", error("invalid length (max={max}, actual={actual})"))]
+    MaxLen { max: usize, actual: usize },
+    #[cfg_attr(feature = "thiserror", error("invalid length (min={min}, actual={actual})"))]
+    MinLen { min: usize, actual: usize },
     #[cfg(feature = "sparse")]
-    #[cfg_attr(feature = "thiserror", error("{0}"))]
+    #[cfg_attr(feature = "thiserror", error("sp4r53-related error ({0})"))]
     Sp4rs3(sparse::Error),
 }
 
@@ -40,13 +49,12 @@ pub enum Error {
 
 macro_rules! assert_min_len {
     ($buf:ident, $min:expr) => {
-        // TODO
-    };
-}
-
-macro_rules! assert_max_len {
-    ($buf:ident, $max:expr) => {
-        // TODO
+        {
+            let min = $min;
+            if $buf.len() < min {
+                return Err(Error::MinLen { min, actual: $buf.len() })
+            }
+        }
     };
 }
 
@@ -55,7 +63,7 @@ macro_rules! encode_len {
         {
             let len = $len;
             if len > u16::MAX as usize {
-                // TODO
+                return Err(Error::MaxLen { max: u16::MAX as usize, actual: len });
             }
 
             (len as u16).encode($buf)?
@@ -149,6 +157,20 @@ impl Encode for chrono::NaiveDateTime {
     }
 }
 
+#[cfg(feature = "ed25519")]
+impl Encode for ed25519::PublicKey {
+    fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8])> {
+        self.as_bytes().encode(buf)
+    }
+}
+
+#[cfg(feature = "ed25519")]
+impl Encode for ed25519::Signature {
+    fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8])> {
+        self.to_bytes().encode(buf)
+    }
+}
+
 #[cfg(feature = "pow")]
 impl Encode for pow::Proofs {
     fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8])> {
@@ -226,6 +248,7 @@ impl<T: Encode> Encode for [T] {
 impl<'buf> Decode<'buf> for chrono::DateTime<chrono::Utc> {
     fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8])> {
         let (time, buf) = chrono::NaiveDateTime::decode(buf)?;
+
         Ok((Self::from_utc(time, chrono::Utc), buf))
     }
 }
@@ -234,7 +257,26 @@ impl<'buf> Decode<'buf> for chrono::DateTime<chrono::Utc> {
 impl<'buf> Decode<'buf> for chrono::NaiveDateTime {
     fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8])> {
         let (time, buf) = i64::decode(buf)?;
+
         Ok((Self::from_timestamp(time, 0), buf))
+    }
+}
+
+#[cfg(feature = "ed25519")]
+impl<'buf> Decode<'buf> for ed25519::PublicKey {
+    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8])> {
+        let (bytes, buf) = <[u8; ed25519::PUBLIC_KEY_LENGTH]>::decode(buf)?;
+
+        Ok((Self::from_bytes(&bytes)?, buf))
+    }
+}
+
+#[cfg(feature = "ed25519")]
+impl<'buf> Decode<'buf> for ed25519::Signature {
+    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8])> {
+        let (bytes, buf) = <[u8; ed25519::SIGNATURE_LENGTH]>::decode(buf)?;
+
+        Ok((Self::from(bytes), buf))
     }
 }
 
@@ -315,6 +357,13 @@ impl<'buf, T: Decode<'buf>> Decode<'buf> for Vec<T> {
 }
 
 // ========================================== impl From ========================================= \\
+
+#[cfg(feature = "ed25519")]
+impl From<ed25519::SignatureError> for Error {
+    fn from(error: ed25519::SignatureError) -> Self {
+        Error::Ed25519(error)
+    }
+}
 
 #[cfg(feature = "sparse")]
 impl From<sparse::Error> for Error {
