@@ -1,0 +1,13 @@
+#+OPTIONS: toc:nil
+
+* ~f0rm47~
+[[https://github.com/r3v2d0g/f0rm47/blob/main/LICENSE.txt][https://img.shields.io/crates/l/f0rm47.svg]]
+[[https://crates.io/crates/f0rm47][https://img.shields.io/crates/v/f0rm47.svg]]
+[[https://docs.rs/f0rm47][https://docs.rs/f0rm47/badge.svg]]
+
+** License
+#+BEGIN_QUOTE
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this
+file, You can obtain one at http://mozilla.org/MPL/2.0/.
+#+END_QUOTE
