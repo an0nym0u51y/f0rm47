@@ -36,6 +36,8 @@ pub enum Error {
     #[cfg(feature = "ed25519")]
     #[cfg_attr(feature = "thiserror", error("ed25519-related error ({0})"))]
     Ed25519(ed25519::SignatureError),
+    #[cfg_attr(feature = "thiserror", error("invalid value"))]
+    InvalidValue,
     #[cfg_attr(feature = "thiserror", error("invalid length (max={max}, actual={actual})"))]
     MaxLen { max: usize, actual: usize },
     #[cfg_attr(feature = "thiserror", error("invalid length (min={min}, actual={actual})"))]
