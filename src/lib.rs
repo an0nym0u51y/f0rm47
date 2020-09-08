@@ -163,6 +163,14 @@ bytes!([u8; 64]);
 
 // ========================================= impl Encode ======================================== \\
 
+impl<T: Encode> Encode for Box<T> {
+    type Error = T::Error;
+
+    fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), T::Error> {
+        T::encode(&**self, buf)
+    }
+}
+
 #[cfg(feature = "chrono")]
 impl Encode for chrono::DateTime<chrono::Utc> {
     type Error = Error;
@@ -281,6 +289,15 @@ impl<T: Encode> Encode for [T] {
 }
 
 // ========================================= impl Decode ======================================== \\
+
+impl<'buf, T: Decode<'buf>> Decode<'buf> for Box<T> {
+    type Error = T::Error;
+
+    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), T::Error> {
+        let (val, buf) = T::decode(buf)?;
+        Ok((Box::new(val), buf))
+    }
+}
 
 #[cfg(feature = "chrono")]
 impl<'buf> Decode<'buf> for chrono::DateTime<chrono::Utc> {
