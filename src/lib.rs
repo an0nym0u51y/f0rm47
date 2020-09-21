@@ -25,7 +25,7 @@ use core::hash::Hash;
 use std::collections::{BTreeMap, HashMap};
 
 #[cfg(feature = "std")]
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 
 #[cfg(feature = "error")]
 use thiserror::Error;
@@ -440,7 +440,7 @@ impl<'buf> Decode<'buf> for IpAddr {
 
     fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
         assert_min_len!(buf, 5);
-        match buf[0] {
+        match u8::from_le(buf[0]) {
             4 => {
                 let (addr, rest) = Ipv4Addr::decode(&buf[1..])?;
                 Ok((IpAddr::V4(addr), rest))
@@ -471,6 +471,112 @@ impl<'buf> Decode<'buf> for Ipv6Addr {
     fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
         let (bytes, rest) = <[u8; 16]>::decode(buf)?;
         Ok((Self::from(bytes), rest))
+    }
+}
+
+/* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
+ * │                     impl {En,De}code for std::net::SocketAddr{,V4,V6}                      │ *
+\* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
+
+#[cfg(feature = "std")]
+impl Encode for SocketAddr {
+    type Error = Error;
+
+    fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
+        match self {
+            SocketAddr::V4(addr) => {
+                assert_min_len!(buf, 7);
+                buf[0] = 4u8.to_le();
+
+                let (bytes, buf) = addr.encode(&mut buf[1..])?;
+                Ok((bytes + 1, buf))
+            },
+            SocketAddr::V6(addr) => {
+                assert_min_len!(buf, 27);
+                buf[0] = 6u8.to_le();
+
+                let (bytes, buf) = addr.encode(&mut buf[1..])?;
+                Ok((bytes + 1, buf))
+            },
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl Encode for SocketAddrV4 {
+    type Error = Error;
+
+    fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
+        let (bytes, buf) = self.ip().encode(buf)?;
+        let (octets, buf) = self.port().encode(buf)?;
+
+        Ok((bytes + octets, buf))
+    }
+}
+
+#[cfg(feature = "std")]
+impl Encode for SocketAddrV6 {
+    type Error = Error;
+
+    fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
+        let (mut bytes, buf) = self.ip().encode(buf)?;
+
+        let (octets, buf) = self.port().encode(buf)?;
+        bytes += octets;
+
+        let (octets, buf) = self.flowinfo().encode(buf)?;
+        bytes += octets;
+
+        let (octets, buf) = self.scope_id().encode(buf)?;
+        bytes += octets;
+
+        Ok((bytes + octets, buf))
+    }
+}
+
+#[cfg(feature = "std")]
+impl<'buf> Decode<'buf> for SocketAddr {
+    type Error = Error;
+
+    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
+        assert_min_len!(buf, 7);
+        match u8::from_le(buf[0]) {
+            4 => {
+                let (addr, rest) = SocketAddrV4::decode(&buf[1..])?;
+                Ok((SocketAddr::V4(addr), rest))
+            },
+            6 => {
+                let (addr, rest) = SocketAddrV6::decode(&buf[1..])?;
+                Ok((SocketAddr::V6(addr), rest))
+            }
+            _ => Err(Error::InvalidValue)
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl<'buf> Decode<'buf> for SocketAddrV4 {
+    type Error = Error;
+
+    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
+        let (ip, buf) = Ipv4Addr::decode(buf)?;
+        let (port, buf) = u16::decode(buf)?;
+
+        Ok((Self::new(ip, port), buf))
+    }
+}
+
+#[cfg(feature = "std")]
+impl<'buf> Decode<'buf> for SocketAddrV6 {
+    type Error = Error;
+
+    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
+        let (ip, buf) = Ipv6Addr::decode(buf)?;
+        let (port, buf) = u16::decode(buf)?;
+        let (flowinfo, buf) = u32::decode(buf)?;
+        let (scope_id, buf) = u32::decode(buf)?;
+
+        Ok((Self::new(ip, port, flowinfo, scope_id), buf))
     }
 }
 
