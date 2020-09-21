@@ -14,29 +14,15 @@ edition = "2018"
 publish = false
 
 [features]
-default = ["thiserror"]
-p0w = ["pow"]
+default = ["std"]
+error = ["thiserror", "std"]
+p0w = ["pow", "std"]
 sp4r53 = ["sparse"]
+std = []
 
-[dependencies.chrono]
-version = "0.4"
-optional = true
-
-[dependencies.ed25519]
-package = "ed25519-dalek"
-version = "1.0"
-optional = true
-
-[dependencies.pow]
-package = "p0w"
-version = "0.2"
-optional = true
-
-[dependencies.sparse]
-package = "sp4r53"
-version = "0.1"
-optional = true
-
-[dependencies.thiserror]
-version = "1.0"
-optional = true
+[dependencies]
+chrono = { version = "0.4", optional = true }
+ed25519 = { package = "ed25519-dalek", version = "1.0", optional = true }
+pow = { package = "p0w", version = "0.2", optional = true }
+sparse = { package = "sp4r53", version = "0.1", optional = true }
+thiserror = { version = "1.0", optional = true }
