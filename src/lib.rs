@@ -24,6 +24,9 @@ use core::hash::Hash;
 #[cfg(feature = "std")]
 use std::collections::{BTreeMap, HashMap};
 
+#[cfg(feature = "std")]
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
 #[cfg(feature = "error")]
 use thiserror::Error;
 
@@ -381,6 +384,93 @@ where
         }
 
         Ok((map, buf))
+    }
+}
+
+/* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
+ * │                            impl {En,De}code for Ip{,v4,v6}Addr                             │ *
+\* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
+
+#[cfg(feature = "std")]
+impl Encode for IpAddr {
+    type Error = Error;
+
+    fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
+        match self {
+            IpAddr::V4(addr) => {
+                assert_min_len!(buf, 5);
+                buf[0] = 4u8.to_le();
+
+                let (bytes, buf) = addr.encode(&mut buf[1..])?;
+                Ok((bytes + 1, buf))
+            }
+            IpAddr::V6(addr) => {
+                assert_min_len!(buf, 17);
+                buf[0] = 16u8.to_le();
+
+                let (bytes, buf) = addr.encode(&mut buf[1..])?;
+                Ok((bytes + 1, buf))
+            }
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl Encode for Ipv4Addr {
+    type Error = Error;
+
+    fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
+        self.octets().encode(buf)
+    }
+}
+
+#[cfg(feature = "std")]
+impl Encode for Ipv6Addr {
+    type Error = Error;
+
+    fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
+        self.octets().encode(buf)
+    }
+}
+
+
+#[cfg(feature = "std")]
+impl<'buf> Decode<'buf> for IpAddr {
+    type Error = Error;
+
+    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
+        assert_min_len!(buf, 5);
+        match buf[0] {
+            4 => {
+                let (addr, rest) = Ipv4Addr::decode(&buf[1..])?;
+                Ok((IpAddr::V4(addr), rest))
+            },
+            6 => {
+                let (addr, rest) = Ipv6Addr::decode(&buf[1..])?;
+                Ok((IpAddr::V6(addr), rest))
+            },
+            _ => Err(Error::InvalidValue),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl<'buf> Decode<'buf> for Ipv4Addr {
+    type Error = Error;
+
+    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
+        let (bytes, rest) = <[u8; 4]>::decode(buf)?;
+        Ok((Self::from(bytes), rest))
+    }
+}
+
+#[cfg(feature = "std")]
+impl<'buf> Decode<'buf> for Ipv6Addr {
+    type Error = Error;
+
+    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
+        let (bytes, rest) = <[u8; 16]>::decode(buf)?;
+        Ok((Self::from(bytes), rest))
     }
 }
 
