@@ -7,15 +7,24 @@
 \* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
 /* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
+ * │                                       Configuration                                        │ *
+\* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
+
+#![cfg_attr(not(feature = "std"), no_std)]
+
+/* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
  * │                                          Imports                                           │ *
 \* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
 use core::mem;
 
-#[cfg(feature = "pow")]
-use std::collections::BTreeMap;
+#[cfg(feature = "std")]
+use core::hash::Hash;
 
-#[cfg(feature = "thiserror")]
+#[cfg(feature = "std")]
+use std::collections::{BTreeMap, HashMap};
+
+#[cfg(feature = "error")]
 use thiserror::Error;
 
 /* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
@@ -39,25 +48,25 @@ pub trait Decode<'buf>: Sized {
 \* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
 #[derive(Debug)]
-#[cfg_attr(feature = "thiserror", derive(Error))]
+#[cfg_attr(feature = "error", derive(Error))]
 pub enum Error {
     #[cfg(feature = "ed25519")]
-    #[cfg_attr(feature = "thiserror", error("ed25519-related error ({0})"))]
+    #[cfg_attr(feature = "error", error("ed25519-related error ({0})"))]
     Ed25519(ed25519::SignatureError),
-    #[cfg_attr(feature = "thiserror", error("invalid value"))]
+    #[cfg_attr(feature = "error", error("invalid value"))]
     InvalidValue,
     #[cfg_attr(
-        feature = "thiserror",
+        feature = "error",
         error("invalid length (max={max}, actual={actual})")
     )]
     MaxLen { max: usize, actual: usize },
     #[cfg_attr(
-        feature = "thiserror",
+        feature = "error",
         error("invalid length (min={min}, actual={actual})")
     )]
     MinLen { min: usize, actual: usize },
-    #[cfg(feature = "sparse")]
-    #[cfg_attr(feature = "thiserror", error("sp4r53-related error ({0})"))]
+    #[cfg(feature = "sp4r53")]
+    #[cfg_attr(feature = "error", error("sp4r53-related error ({0})"))]
     Sp4rs3(sparse::Error),
 }
 
@@ -268,6 +277,114 @@ impl<'buf> Decode<'buf> for Vec<u8> {
 }
 
 /* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
+ * │                            impl {En,De}code for {Hash,BTree}Map                            │ *
+\* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
+
+#[cfg(feature = "std")]
+impl<K, V, E> Encode for HashMap<K, V>
+where
+    K: Encode<Error = E>,
+    V: Encode<Error = E>,
+    E: From<Error>,
+{
+    type Error = E;
+
+    fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), E> {
+        let (mut bytes, mut buf) = encode_len!(buf, self.len());
+        for (key, value) in self {
+            let (octets, rest) = key.encode(buf)?;
+            bytes += octets;
+            buf = rest;
+
+            let (octets, rest) = value.encode(buf)?;
+            bytes += octets;
+            buf = rest;
+        }
+
+        Ok((bytes, buf))
+    }
+}
+
+#[cfg(feature = "std")]
+impl<K, V, E> Encode for BTreeMap<K, V>
+where
+    K: Encode<Error = E>,
+    V: Encode<Error = E>,
+    E: From<Error>,
+{
+    type Error = E;
+
+    fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), E> {
+        let (mut bytes, mut buf) = encode_len!(buf, self.len());
+        for (key, value) in self {
+            let (octets, rest) = key.encode(buf)?;
+            bytes += octets;
+            buf = rest;
+
+            let (octets, rest) = value.encode(buf)?;
+            bytes += octets;
+            buf = rest;
+        }
+
+        Ok((bytes, buf))
+    }
+}
+
+#[cfg(feature = "std")]
+impl<'buf, K, V, E> Decode<'buf> for HashMap<K, V>
+where
+    K: Decode<'buf, Error = E> + Hash + Eq,
+    V: Decode<'buf, Error = E>,
+    E: From<Error>,
+{
+    type Error = E;
+
+    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), E> {
+        let (len, mut buf) = decode_len!(buf);
+
+        let mut map = HashMap::with_capacity(len);
+        for _ in 0..len {
+            let (key, rest) = K::decode(buf)?;
+            buf = rest;
+
+            let (value, rest) = V::decode(buf)?;
+            buf = rest;
+
+            map.insert(key, value);
+        }
+
+        Ok((map, buf))
+    }
+}
+
+#[cfg(feature = "std")]
+impl<'buf, K, V, E> Decode<'buf> for BTreeMap<K, V>
+where
+    K: Decode<'buf, Error = E> + Ord,
+    V: Decode<'buf, Error = E>,
+    E: From<Error>,
+{
+    type Error = E;
+
+    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), E> {
+        let (len, mut buf) = decode_len!(buf);
+       
+        let mut map = BTreeMap::new();
+        for _ in 0..len {
+            let (key, rest) = K::decode(buf)?;
+            buf = rest;
+
+            let (value, rest) = V::decode(buf)?;
+            buf = rest;
+
+            map.insert(key, value);
+        }
+
+        Ok((map, buf))
+    }
+}
+
+/* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
  * │                       impl {En,De}code for chrono::{,Naive}DateTime                        │ *
 \* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
@@ -359,7 +476,7 @@ impl<'buf> Decode<'buf> for ed25519::Signature {
  * │                              impl {En,De}code for pow::Proofs                              │ *
 \* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
-#[cfg(feature = "pow")]
+#[cfg(feature = "p0w")]
 impl Encode for pow::Proofs {
     type Error = Error;
 
@@ -394,7 +511,7 @@ impl Encode for pow::Proofs {
     }
 }
 
-#[cfg(feature = "pow")]
+#[cfg(feature = "p0w")]
 impl<'buf> Decode<'buf> for pow::Proofs {
     type Error = Error;
 
@@ -423,7 +540,7 @@ impl<'buf> Decode<'buf> for pow::Proofs {
  * │                         impl {En,De}code for sparse::{Hash,Proof}                          │ *
 \* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
-#[cfg(feature = "sparse")]
+#[cfg(feature = "sp4r53")]
 impl Encode for sparse::Hash {
     type Error = Error;
 
@@ -432,7 +549,7 @@ impl Encode for sparse::Hash {
     }
 }
 
-#[cfg(feature = "sparse")]
+#[cfg(feature = "sp4r53")]
 impl Encode for sparse::Proof {
     type Error = Error;
 
@@ -441,7 +558,7 @@ impl Encode for sparse::Proof {
     }
 }
 
-#[cfg(feature = "sparse")]
+#[cfg(feature = "sp3r53")]
 impl<'buf> Decode<'buf> for sparse::Hash {
     type Error = Error;
 
@@ -452,7 +569,7 @@ impl<'buf> Decode<'buf> for sparse::Hash {
     }
 }
 
-#[cfg(feature = "sparse")]
+#[cfg(feature = "sp4r53")]
 impl<'buf> Decode<'buf> for sparse::Proof {
     type Error = Error;
 
@@ -474,7 +591,7 @@ impl From<ed25519::SignatureError> for Error {
     }
 }
 
-#[cfg(feature = "sparse")]
+#[cfg(feature = "sp4r53")]
 impl From<sparse::Error> for Error {
     fn from(error: sparse::Error) -> Self {
         Error::Sp4rs3(error)
