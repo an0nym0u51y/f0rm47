@@ -1,12 +1,14 @@
-/**************************************************************************************************
- *                                                                                                *
- * This Source Code Form is subject to the terms of the Mozilla Public                            *
- * License, v. 2.0. If a copy of the MPL was not distributed with this                            *
- * file, You can obtain one at http://mozilla.org/MPL/2.0/.                                       *
- *                                                                                                *
- **************************************************************************************************/
+/* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
+ * │                                                                                            │ *
+ * │ This Source Code Form is subject to the terms of the Mozilla Public                        │ *
+ * │ License, v. 2.0. If a copy of the MPL was not distributed with this                        │ *
+ * │ file, You can obtain one at http://mozilla.org/MPL/2.0/.                                   │ *
+ * │                                                                                            │ *
+\* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
-// =========================================== Imports ========================================== \\
+/* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
+ * │                                          Imports                                           │ *
+\* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
 use core::mem;
 
@@ -16,7 +18,9 @@ use std::collections::BTreeMap;
 #[cfg(feature = "thiserror")]
 use thiserror::Error;
 
-// ========================================= Interfaces ========================================= \\
+/* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
+ * │                                         Interfaces                                         │ *
+\* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
 pub trait Encode {
     type Error: From<Error>;
@@ -30,7 +34,9 @@ pub trait Decode<'buf>: Sized {
     fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Self::Error>;
 }
 
-// ============================================ Types =========================================== \\
+/* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
+ * │                                           Types                                            │ *
+\* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
 #[derive(Debug)]
 #[cfg_attr(feature = "thiserror", derive(Error))]
@@ -55,7 +61,9 @@ pub enum Error {
     Sp4rs3(sparse::Error),
 }
 
-// ======================================== macro_rules! ======================================== \\
+/* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
+ * │                                           Macros                                           │ *
+\* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
 macro_rules! assert_min_len {
     ($buf:ident, $min:expr) => {{
@@ -142,7 +150,9 @@ macro_rules! bytes {
     };
 }
 
-// ========================================= primitive! ========================================= \\
+/* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
+ * │                                       primitive!(..)                                       │ *
+\* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
 primitive!(u16);
 primitive!(u32);
@@ -152,7 +162,9 @@ primitive!(i16);
 primitive!(i32);
 primitive!(i64);
 
-// =========================================== bytes! =========================================== \\
+/* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
+ * │                                         bytes!(..)                                         │ *
+\* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
 bytes!([u8; 2]);
 bytes!([u8; 4]);
@@ -161,7 +173,9 @@ bytes!([u8; 16]);
 bytes!([u8; 32]);
 bytes!([u8; 64]);
 
-// ========================================= impl Encode ======================================== \\
+/* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
+ * │                             impl {En,De}code for {Box<T>,[T]}                              │ *
+\* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
 impl<T: Encode> Encode for Box<T> {
     type Error = T::Error;
@@ -170,6 +184,92 @@ impl<T: Encode> Encode for Box<T> {
         T::encode(&**self, buf)
     }
 }
+
+impl<T: Encode> Encode for [T] {
+    type Error = T::Error;
+
+    fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), T::Error> {
+        let (mut bytes, mut buf) = encode_len!(buf, self.len());
+
+        for elem in self {
+            let (octets, rest) = elem.encode(buf)?;
+            bytes += octets;
+            buf = rest;
+        }
+
+        Ok((bytes, buf))
+    }
+}
+
+impl<'buf, T: Decode<'buf>> Decode<'buf> for Box<T> {
+    type Error = T::Error;
+
+    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), T::Error> {
+        let (val, buf) = T::decode(buf)?;
+        Ok((Box::new(val), buf))
+    }
+}
+
+impl<'buf, T: Decode<'buf>> Decode<'buf> for Vec<T> {
+    type Error = T::Error;
+
+    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), T::Error> {
+        let (len, mut buf) = decode_len!(buf);
+
+        let mut elems = Vec::with_capacity(len);
+        for _ in 0..len {
+            let (elem, rest) = T::decode(buf)?;
+
+            elems.push(elem);
+            buf = rest;
+        }
+
+        Ok((elems, buf))
+    }
+}
+
+/* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
+ * │                                 impl {En,De}code for [u8]                                  │ *
+\* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
+
+impl Encode for [u8] {
+    type Error = Error;
+
+    fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
+        let (bytes, buf) = encode_len!(buf, self.len());
+
+        buf[0..self.len()].copy_from_slice(self);
+
+        Ok((bytes + self.len(), &mut buf[self.len()..]))
+    }
+}
+
+impl<'buf> Decode<'buf> for &'buf [u8] {
+    type Error = Error;
+
+    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
+        let (len, buf) = decode_len!(buf);
+        assert_min_len!(buf, len);
+
+        Ok(buf.split_at(len))
+    }
+}
+
+impl<'buf> Decode<'buf> for Vec<u8> {
+    type Error = Error;
+
+    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
+        let (len, buf) = decode_len!(buf);
+        assert_min_len!(buf, len);
+
+        let (bytes, rest) = buf.split_at(len);
+        Ok((Vec::from(bytes), rest))
+    }
+}
+
+/* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
+ * │                       impl {En,De}code for chrono::{,Naive}DateTime                        │ *
+\* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
 #[cfg(feature = "chrono")]
 impl Encode for chrono::DateTime<chrono::Utc> {
@@ -189,6 +289,32 @@ impl Encode for chrono::NaiveDateTime {
     }
 }
 
+#[cfg(feature = "chrono")]
+impl<'buf> Decode<'buf> for chrono::DateTime<chrono::Utc> {
+    type Error = Error;
+
+    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
+        let (time, buf) = chrono::NaiveDateTime::decode(buf)?;
+
+        Ok((Self::from_utc(time, chrono::Utc), buf))
+    }
+}
+
+#[cfg(feature = "chrono")]
+impl<'buf> Decode<'buf> for chrono::NaiveDateTime {
+    type Error = Error;
+
+    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
+        let (time, buf) = i64::decode(buf)?;
+
+        Ok((Self::from_timestamp(time, 0), buf))
+    }
+}
+
+/* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
+ * │                    imlp {En,De}code for ed25519::{PublicKey,Signature}                     │ *
+\* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
+
 #[cfg(feature = "ed25519")]
 impl Encode for ed25519::PublicKey {
     type Error = Error;
@@ -206,6 +332,32 @@ impl Encode for ed25519::Signature {
         self.to_bytes().encode(buf)
     }
 }
+
+#[cfg(feature = "ed25519")]
+impl<'buf> Decode<'buf> for ed25519::PublicKey {
+    type Error = Error;
+
+    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
+        let (bytes, buf) = <[u8; ed25519::PUBLIC_KEY_LENGTH]>::decode(buf)?;
+
+        Ok((Self::from_bytes(&bytes)?, buf))
+    }
+}
+
+#[cfg(feature = "ed25519")]
+impl<'buf> Decode<'buf> for ed25519::Signature {
+    type Error = Error;
+
+    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
+        let (bytes, buf) = <[u8; ed25519::SIGNATURE_LENGTH]>::decode(buf)?;
+
+        Ok((Self::from(bytes), buf))
+    }
+}
+
+/* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
+ * │                              impl {En,De}code for pow::Proofs                              │ *
+\* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
 #[cfg(feature = "pow")]
 impl Encode for pow::Proofs {
@@ -242,107 +394,6 @@ impl Encode for pow::Proofs {
     }
 }
 
-#[cfg(feature = "sparse")]
-impl Encode for sparse::Hash {
-    type Error = Error;
-
-    fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
-        <[u8; 32]>::encode(self.as_bytes(), buf)
-    }
-}
-
-#[cfg(feature = "sparse")]
-impl Encode for sparse::Proof {
-    type Error = Error;
-
-    fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
-        self.as_bytes().encode(buf)
-    }
-}
-
-impl Encode for [u8] {
-    type Error = Error;
-
-    fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
-        let (bytes, buf) = encode_len!(buf, self.len());
-
-        buf[0..self.len()].copy_from_slice(self);
-
-        Ok((bytes + self.len(), &mut buf[self.len()..]))
-    }
-}
-
-impl<T: Encode> Encode for [T] {
-    type Error = T::Error;
-
-    fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), T::Error> {
-        let (mut bytes, mut buf) = encode_len!(buf, self.len());
-
-        for elem in self {
-            let (octets, rest) = elem.encode(buf)?;
-            bytes += octets;
-            buf = rest;
-        }
-
-        Ok((bytes, buf))
-    }
-}
-
-// ========================================= impl Decode ======================================== \\
-
-impl<'buf, T: Decode<'buf>> Decode<'buf> for Box<T> {
-    type Error = T::Error;
-
-    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), T::Error> {
-        let (val, buf) = T::decode(buf)?;
-        Ok((Box::new(val), buf))
-    }
-}
-
-#[cfg(feature = "chrono")]
-impl<'buf> Decode<'buf> for chrono::DateTime<chrono::Utc> {
-    type Error = Error;
-
-    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
-        let (time, buf) = chrono::NaiveDateTime::decode(buf)?;
-
-        Ok((Self::from_utc(time, chrono::Utc), buf))
-    }
-}
-
-#[cfg(feature = "chrono")]
-impl<'buf> Decode<'buf> for chrono::NaiveDateTime {
-    type Error = Error;
-
-    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
-        let (time, buf) = i64::decode(buf)?;
-
-        Ok((Self::from_timestamp(time, 0), buf))
-    }
-}
-
-#[cfg(feature = "ed25519")]
-impl<'buf> Decode<'buf> for ed25519::PublicKey {
-    type Error = Error;
-
-    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
-        let (bytes, buf) = <[u8; ed25519::PUBLIC_KEY_LENGTH]>::decode(buf)?;
-
-        Ok((Self::from_bytes(&bytes)?, buf))
-    }
-}
-
-#[cfg(feature = "ed25519")]
-impl<'buf> Decode<'buf> for ed25519::Signature {
-    type Error = Error;
-
-    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
-        let (bytes, buf) = <[u8; ed25519::SIGNATURE_LENGTH]>::decode(buf)?;
-
-        Ok((Self::from(bytes), buf))
-    }
-}
-
 #[cfg(feature = "pow")]
 impl<'buf> Decode<'buf> for pow::Proofs {
     type Error = Error;
@@ -368,6 +419,28 @@ impl<'buf> Decode<'buf> for pow::Proofs {
     }
 }
 
+/* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
+ * │                         impl {En,De}code for sparse::{Hash,Proof}                          │ *
+\* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
+
+#[cfg(feature = "sparse")]
+impl Encode for sparse::Hash {
+    type Error = Error;
+
+    fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
+        <[u8; 32]>::encode(self.as_bytes(), buf)
+    }
+}
+
+#[cfg(feature = "sparse")]
+impl Encode for sparse::Proof {
+    type Error = Error;
+
+    fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
+        self.as_bytes().encode(buf)
+    }
+}
+
 #[cfg(feature = "sparse")]
 impl<'buf> Decode<'buf> for sparse::Hash {
     type Error = Error;
@@ -390,48 +463,9 @@ impl<'buf> Decode<'buf> for sparse::Proof {
     }
 }
 
-impl<'buf> Decode<'buf> for &'buf [u8] {
-    type Error = Error;
-
-    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
-        let (len, buf) = decode_len!(buf);
-        assert_min_len!(buf, len);
-
-        Ok(buf.split_at(len))
-    }
-}
-
-impl<'buf> Decode<'buf> for Vec<u8> {
-    type Error = Error;
-
-    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
-        let (len, buf) = decode_len!(buf);
-        assert_min_len!(buf, len);
-
-        let (bytes, rest) = buf.split_at(len);
-        Ok((Vec::from(bytes), rest))
-    }
-}
-
-impl<'buf, T: Decode<'buf>> Decode<'buf> for Vec<T> {
-    type Error = T::Error;
-
-    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), T::Error> {
-        let (len, mut buf) = decode_len!(buf);
-
-        let mut elems = Vec::with_capacity(len);
-        for _ in 0..len {
-            let (elem, rest) = T::decode(buf)?;
-
-            elems.push(elem);
-            buf = rest;
-        }
-
-        Ok((elems, buf))
-    }
-}
-
-// ========================================== impl From ========================================= \\
+/* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
+ * │                                   impl From<*> for Error                                   │ *
+\* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
 #[cfg(feature = "ed25519")]
 impl From<ed25519::SignatureError> for Error {
