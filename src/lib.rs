@@ -37,13 +37,28 @@ use thiserror::Error;
 pub trait Encode {
     type Error: From<Error>;
 
-    fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Self::Error>;
+    fn encode(&self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+        Ok(self.raw_encode(buf)?.0)
+    }
+
+    fn encode_chain<'buf>(&self, buf: &'buf mut [u8], bytes: &mut usize) -> Result<&'buf mut [u8], Self::Error> {
+        let (octets, rest) = self.raw_encode(buf)?;
+        *bytes += octets;
+
+        Ok(rest)
+    }
+
+    fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Self::Error>;
 }
 
 pub trait Decode<'buf>: Sized {
     type Error: From<Error>;
 
-    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Self::Error>;
+    fn decode(buf: &'buf [u8]) -> Result<Self, Self::Error> {
+        Ok(Self::raw_decode(buf)?.0)
+    }
+
+    fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Self::Error>;
 }
 
 /* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
@@ -70,7 +85,7 @@ pub enum Error {
     MinLen { min: usize, actual: usize },
     #[cfg(feature = "sp4r53")]
     #[cfg_attr(feature = "error", error("sp4r53-related error ({0})"))]
-    Sp4rs3(sparse::Error),
+    Sparse(sparse::Error),
 }
 
 /* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
@@ -91,7 +106,7 @@ macro_rules! assert_min_len {
 }
 
 macro_rules! encode_len {
-    ($buf:ident, $len:expr) => {{
+    ($buf:ident, $bytes:ident, $len:expr) => {{
         let len = $len;
         if len > u16::MAX as usize {
             return Err(Error::MaxLen {
@@ -101,13 +116,13 @@ macro_rules! encode_len {
             .into());
         }
 
-        (len as u16).encode($buf)?
+        (len as u16).encode_chain($buf, &mut $bytes)?
     }};
 }
 
 macro_rules! decode_len {
     ($buf:ident) => {{
-        let (len, buf) = u16::decode($buf)?;
+        let (len, buf) = u16::raw_decode($buf)?;
         (len as usize, buf)
     }};
 }
@@ -117,16 +132,16 @@ macro_rules! primitive {
         impl Encode for $primitive {
             type Error = Error;
 
-            fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
-                self.to_le_bytes().encode(buf)
+            fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
+                self.to_le_bytes().raw_encode(buf)
             }
         }
 
         impl<'buf> Decode<'buf> for $primitive {
             type Error = Error;
 
-            fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
-                let (bytes, buf) = <[u8; mem::size_of::<$primitive>()]>::decode(buf)?;
+            fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
+                let (bytes, buf) = <[u8; mem::size_of::<$primitive>()]>::raw_decode(buf)?;
                 Ok((<$primitive>::from_le_bytes(bytes), buf))
             }
         }
@@ -138,7 +153,7 @@ macro_rules! bytes {
         impl Encode for [u8; $size] {
             type Error = Error;
 
-            fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
+            fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
                 assert_min_len!(buf, $size);
 
                 buf[0..$size].copy_from_slice(self);
@@ -150,7 +165,7 @@ macro_rules! bytes {
         impl<'buf> Decode<'buf> for [u8; $size] {
             type Error = Error;
 
-            fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
+            fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
                 assert_min_len!(buf, $size);
 
                 let mut bytes = [0; $size];
@@ -192,21 +207,20 @@ bytes!([u8; 64]);
 impl<T: Encode> Encode for Box<T> {
     type Error = T::Error;
 
-    fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), T::Error> {
-        T::encode(&**self, buf)
+    fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), T::Error> {
+        T::raw_encode(&**self, buf)
     }
 }
 
 impl<T: Encode> Encode for [T] {
     type Error = T::Error;
 
-    fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), T::Error> {
-        let (mut bytes, mut buf) = encode_len!(buf, self.len());
+    fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), T::Error> {
+        let mut bytes = 0;
+        let mut buf = encode_len!(buf, bytes, self.len());
 
         for elem in self {
-            let (octets, rest) = elem.encode(buf)?;
-            bytes += octets;
-            buf = rest;
+            buf = elem.encode_chain(buf, &mut bytes)?;
         }
 
         Ok((bytes, buf))
@@ -216,8 +230,8 @@ impl<T: Encode> Encode for [T] {
 impl<'buf, T: Decode<'buf>> Decode<'buf> for Box<T> {
     type Error = T::Error;
 
-    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), T::Error> {
-        let (val, buf) = T::decode(buf)?;
+    fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), T::Error> {
+        let (val, buf) = T::raw_decode(buf)?;
         Ok((Box::new(val), buf))
     }
 }
@@ -225,12 +239,12 @@ impl<'buf, T: Decode<'buf>> Decode<'buf> for Box<T> {
 impl<'buf, T: Decode<'buf>> Decode<'buf> for Vec<T> {
     type Error = T::Error;
 
-    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), T::Error> {
+    fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), T::Error> {
         let (len, mut buf) = decode_len!(buf);
 
         let mut elems = Vec::with_capacity(len);
         for _ in 0..len {
-            let (elem, rest) = T::decode(buf)?;
+            let (elem, rest) = T::raw_decode(buf)?;
 
             elems.push(elem);
             buf = rest;
@@ -247,8 +261,9 @@ impl<'buf, T: Decode<'buf>> Decode<'buf> for Vec<T> {
 impl Encode for [u8] {
     type Error = Error;
 
-    fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
-        let (bytes, buf) = encode_len!(buf, self.len());
+    fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
+        let mut bytes = 0;
+        let buf = encode_len!(buf, bytes, self.len());
 
         buf[0..self.len()].copy_from_slice(self);
 
@@ -259,7 +274,7 @@ impl Encode for [u8] {
 impl<'buf> Decode<'buf> for &'buf [u8] {
     type Error = Error;
 
-    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
+    fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
         let (len, buf) = decode_len!(buf);
         assert_min_len!(buf, len);
 
@@ -270,7 +285,7 @@ impl<'buf> Decode<'buf> for &'buf [u8] {
 impl<'buf> Decode<'buf> for Vec<u8> {
     type Error = Error;
 
-    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
+    fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
         let (len, buf) = decode_len!(buf);
         assert_min_len!(buf, len);
 
@@ -292,16 +307,12 @@ where
 {
     type Error = E;
 
-    fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), E> {
-        let (mut bytes, mut buf) = encode_len!(buf, self.len());
+    fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), E> {
+        let mut bytes = 0;
+        let mut buf = encode_len!(buf, bytes, self.len());
         for (key, value) in self {
-            let (octets, rest) = key.encode(buf)?;
-            bytes += octets;
-            buf = rest;
-
-            let (octets, rest) = value.encode(buf)?;
-            bytes += octets;
-            buf = rest;
+            buf = key.encode_chain(buf, &mut bytes)?;
+            buf = value.encode_chain(buf, &mut bytes)?;
         }
 
         Ok((bytes, buf))
@@ -317,16 +328,12 @@ where
 {
     type Error = E;
 
-    fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), E> {
-        let (mut bytes, mut buf) = encode_len!(buf, self.len());
+    fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), E> {
+        let mut bytes = 0;
+        let mut buf = encode_len!(buf, bytes, self.len());
         for (key, value) in self {
-            let (octets, rest) = key.encode(buf)?;
-            bytes += octets;
-            buf = rest;
-
-            let (octets, rest) = value.encode(buf)?;
-            bytes += octets;
-            buf = rest;
+            buf = key.encode_chain(buf, &mut bytes)?;
+            buf = value.encode_chain(buf, &mut bytes)?;
         }
 
         Ok((bytes, buf))
@@ -342,15 +349,15 @@ where
 {
     type Error = E;
 
-    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), E> {
+    fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), E> {
         let (len, mut buf) = decode_len!(buf);
 
         let mut map = HashMap::with_capacity(len);
         for _ in 0..len {
-            let (key, rest) = K::decode(buf)?;
+            let (key, rest) = K::raw_decode(buf)?;
             buf = rest;
 
-            let (value, rest) = V::decode(buf)?;
+            let (value, rest) = V::raw_decode(buf)?;
             buf = rest;
 
             map.insert(key, value);
@@ -369,15 +376,15 @@ where
 {
     type Error = E;
 
-    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), E> {
+    fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), E> {
         let (len, mut buf) = decode_len!(buf);
        
         let mut map = BTreeMap::new();
         for _ in 0..len {
-            let (key, rest) = K::decode(buf)?;
+            let (key, rest) = K::raw_decode(buf)?;
             buf = rest;
 
-            let (value, rest) = V::decode(buf)?;
+            let (value, rest) = V::raw_decode(buf)?;
             buf = rest;
 
             map.insert(key, value);
@@ -395,20 +402,20 @@ where
 impl Encode for IpAddr {
     type Error = Error;
 
-    fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
+    fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
         match self {
             IpAddr::V4(addr) => {
                 assert_min_len!(buf, 5);
                 buf[0] = 4u8.to_le();
 
-                let (bytes, buf) = addr.encode(&mut buf[1..])?;
+                let (bytes, buf) = addr.raw_encode(&mut buf[1..])?;
                 Ok((bytes + 1, buf))
             }
             IpAddr::V6(addr) => {
                 assert_min_len!(buf, 17);
                 buf[0] = 16u8.to_le();
 
-                let (bytes, buf) = addr.encode(&mut buf[1..])?;
+                let (bytes, buf) = addr.raw_encode(&mut buf[1..])?;
                 Ok((bytes + 1, buf))
             }
         }
@@ -419,8 +426,8 @@ impl Encode for IpAddr {
 impl Encode for Ipv4Addr {
     type Error = Error;
 
-    fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
-        self.octets().encode(buf)
+    fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
+        self.octets().raw_encode(buf)
     }
 }
 
@@ -428,8 +435,8 @@ impl Encode for Ipv4Addr {
 impl Encode for Ipv6Addr {
     type Error = Error;
 
-    fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
-        self.octets().encode(buf)
+    fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
+        self.octets().raw_encode(buf)
     }
 }
 
@@ -438,15 +445,15 @@ impl Encode for Ipv6Addr {
 impl<'buf> Decode<'buf> for IpAddr {
     type Error = Error;
 
-    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
+    fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
         assert_min_len!(buf, 5);
         match u8::from_le(buf[0]) {
             4 => {
-                let (addr, rest) = Ipv4Addr::decode(&buf[1..])?;
+                let (addr, rest) = Ipv4Addr::raw_decode(&buf[1..])?;
                 Ok((IpAddr::V4(addr), rest))
             },
             6 => {
-                let (addr, rest) = Ipv6Addr::decode(&buf[1..])?;
+                let (addr, rest) = Ipv6Addr::raw_decode(&buf[1..])?;
                 Ok((IpAddr::V6(addr), rest))
             },
             _ => Err(Error::InvalidValue),
@@ -458,8 +465,8 @@ impl<'buf> Decode<'buf> for IpAddr {
 impl<'buf> Decode<'buf> for Ipv4Addr {
     type Error = Error;
 
-    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
-        let (bytes, rest) = <[u8; 4]>::decode(buf)?;
+    fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
+        let (bytes, rest) = <[u8; 4]>::raw_decode(buf)?;
         Ok((Self::from(bytes), rest))
     }
 }
@@ -468,8 +475,8 @@ impl<'buf> Decode<'buf> for Ipv4Addr {
 impl<'buf> Decode<'buf> for Ipv6Addr {
     type Error = Error;
 
-    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
-        let (bytes, rest) = <[u8; 16]>::decode(buf)?;
+    fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
+        let (bytes, rest) = <[u8; 16]>::raw_decode(buf)?;
         Ok((Self::from(bytes), rest))
     }
 }
@@ -482,20 +489,20 @@ impl<'buf> Decode<'buf> for Ipv6Addr {
 impl Encode for SocketAddr {
     type Error = Error;
 
-    fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
+    fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
         match self {
             SocketAddr::V4(addr) => {
                 assert_min_len!(buf, 7);
                 buf[0] = 4u8.to_le();
 
-                let (bytes, buf) = addr.encode(&mut buf[1..])?;
+                let (bytes, buf) = addr.raw_encode(&mut buf[1..])?;
                 Ok((bytes + 1, buf))
             },
             SocketAddr::V6(addr) => {
                 assert_min_len!(buf, 27);
                 buf[0] = 6u8.to_le();
 
-                let (bytes, buf) = addr.encode(&mut buf[1..])?;
+                let (bytes, buf) = addr.raw_encode(&mut buf[1..])?;
                 Ok((bytes + 1, buf))
             },
         }
@@ -506,9 +513,9 @@ impl Encode for SocketAddr {
 impl Encode for SocketAddrV4 {
     type Error = Error;
 
-    fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
-        let (bytes, buf) = self.ip().encode(buf)?;
-        let (octets, buf) = self.port().encode(buf)?;
+    fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
+        let (bytes, buf) = self.ip().raw_encode(buf)?;
+        let (octets, buf) = self.port().raw_encode(buf)?;
 
         Ok((bytes + octets, buf))
     }
@@ -518,16 +525,16 @@ impl Encode for SocketAddrV4 {
 impl Encode for SocketAddrV6 {
     type Error = Error;
 
-    fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
-        let (mut bytes, buf) = self.ip().encode(buf)?;
+    fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
+        let (mut bytes, buf) = self.ip().raw_encode(buf)?;
 
-        let (octets, buf) = self.port().encode(buf)?;
+        let (octets, buf) = self.port().raw_encode(buf)?;
         bytes += octets;
 
-        let (octets, buf) = self.flowinfo().encode(buf)?;
+        let (octets, buf) = self.flowinfo().raw_encode(buf)?;
         bytes += octets;
 
-        let (octets, buf) = self.scope_id().encode(buf)?;
+        let (octets, buf) = self.scope_id().raw_encode(buf)?;
         bytes += octets;
 
         Ok((bytes + octets, buf))
@@ -538,15 +545,15 @@ impl Encode for SocketAddrV6 {
 impl<'buf> Decode<'buf> for SocketAddr {
     type Error = Error;
 
-    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
+    fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
         assert_min_len!(buf, 7);
         match u8::from_le(buf[0]) {
             4 => {
-                let (addr, rest) = SocketAddrV4::decode(&buf[1..])?;
+                let (addr, rest) = SocketAddrV4::raw_decode(&buf[1..])?;
                 Ok((SocketAddr::V4(addr), rest))
             },
             6 => {
-                let (addr, rest) = SocketAddrV6::decode(&buf[1..])?;
+                let (addr, rest) = SocketAddrV6::raw_decode(&buf[1..])?;
                 Ok((SocketAddr::V6(addr), rest))
             }
             _ => Err(Error::InvalidValue)
@@ -558,9 +565,9 @@ impl<'buf> Decode<'buf> for SocketAddr {
 impl<'buf> Decode<'buf> for SocketAddrV4 {
     type Error = Error;
 
-    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
-        let (ip, buf) = Ipv4Addr::decode(buf)?;
-        let (port, buf) = u16::decode(buf)?;
+    fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
+        let (ip, buf) = Ipv4Addr::raw_decode(buf)?;
+        let (port, buf) = u16::raw_decode(buf)?;
 
         Ok((Self::new(ip, port), buf))
     }
@@ -570,11 +577,11 @@ impl<'buf> Decode<'buf> for SocketAddrV4 {
 impl<'buf> Decode<'buf> for SocketAddrV6 {
     type Error = Error;
 
-    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
-        let (ip, buf) = Ipv6Addr::decode(buf)?;
-        let (port, buf) = u16::decode(buf)?;
-        let (flowinfo, buf) = u32::decode(buf)?;
-        let (scope_id, buf) = u32::decode(buf)?;
+    fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
+        let (ip, buf) = Ipv6Addr::raw_decode(buf)?;
+        let (port, buf) = u16::raw_decode(buf)?;
+        let (flowinfo, buf) = u32::raw_decode(buf)?;
+        let (scope_id, buf) = u32::raw_decode(buf)?;
 
         Ok((Self::new(ip, port, flowinfo, scope_id), buf))
     }
@@ -588,8 +595,8 @@ impl<'buf> Decode<'buf> for SocketAddrV6 {
 impl Encode for chrono::DateTime<chrono::Utc> {
     type Error = Error;
 
-    fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
-        self.naive_utc().encode(buf)
+    fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
+        self.naive_utc().raw_encode(buf)
     }
 }
 
@@ -597,8 +604,8 @@ impl Encode for chrono::DateTime<chrono::Utc> {
 impl Encode for chrono::NaiveDateTime {
     type Error = Error;
 
-    fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
-        self.timestamp().encode(buf)
+    fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
+        self.timestamp().raw_encode(buf)
     }
 }
 
@@ -606,8 +613,8 @@ impl Encode for chrono::NaiveDateTime {
 impl<'buf> Decode<'buf> for chrono::DateTime<chrono::Utc> {
     type Error = Error;
 
-    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
-        let (time, buf) = chrono::NaiveDateTime::decode(buf)?;
+    fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
+        let (time, buf) = chrono::NaiveDateTime::raw_decode(buf)?;
 
         Ok((Self::from_utc(time, chrono::Utc), buf))
     }
@@ -617,8 +624,8 @@ impl<'buf> Decode<'buf> for chrono::DateTime<chrono::Utc> {
 impl<'buf> Decode<'buf> for chrono::NaiveDateTime {
     type Error = Error;
 
-    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
-        let (time, buf) = i64::decode(buf)?;
+    fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
+        let (time, buf) = i64::raw_decode(buf)?;
 
         Ok((Self::from_timestamp(time, 0), buf))
     }
@@ -632,8 +639,8 @@ impl<'buf> Decode<'buf> for chrono::NaiveDateTime {
 impl Encode for ed25519::PublicKey {
     type Error = Error;
 
-    fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
-        self.as_bytes().encode(buf)
+    fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
+        self.as_bytes().raw_encode(buf)
     }
 }
 
@@ -641,8 +648,8 @@ impl Encode for ed25519::PublicKey {
 impl Encode for ed25519::Signature {
     type Error = Error;
 
-    fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
-        self.to_bytes().encode(buf)
+    fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
+        self.to_bytes().raw_encode(buf)
     }
 }
 
@@ -650,19 +657,18 @@ impl Encode for ed25519::Signature {
 impl<'buf> Decode<'buf> for ed25519::PublicKey {
     type Error = Error;
 
-    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
-        let (bytes, buf) = <[u8; ed25519::PUBLIC_KEY_LENGTH]>::decode(buf)?;
+    fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
+        let (bytes, buf) = <[u8; ed25519::PUBLIC_KEY_LENGTH]>::raw_decode(buf)?;
 
         Ok((Self::from_bytes(&bytes)?, buf))
     }
 }
 
 #[cfg(feature = "ed25519")]
-impl<'buf> Decode<'buf> for ed25519::Signature {
-    type Error = Error;
+impl<'buf> Decode<'buf> for ed25519::Signature {type Error = Error;
 
-    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
-        let (bytes, buf) = <[u8; ed25519::SIGNATURE_LENGTH]>::decode(buf)?;
+    fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
+        let (bytes, buf) = <[u8; ed25519::SIGNATURE_LENGTH]>::raw_decode(buf)?;
 
         Ok((Self::from(bytes), buf))
     }
@@ -676,31 +682,21 @@ impl<'buf> Decode<'buf> for ed25519::Signature {
 impl Encode for pow::Proofs {
     type Error = Error;
 
-    fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
+    fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
+        let mut bytes = 0;
         let desc = self.description();
-        let (mut bytes, buf) = desc.encode(buf)?;
+        let buf = desc.encode_chain(buf, &mut bytes)?;
 
-        let levels = self.levels();
-        let (octets, buf) = encode_len!(buf, levels);
-        bytes += octets;
-
-        let proofs = self.proofs();
-        let (octets, buf) = encode_len!(buf, proofs);
-        bytes += octets;
+        let buf = encode_len!(buf, bytes, self.levels());
+        let buf = encode_len!(buf, bytes, self.proofs());
 
         let nodes = self.as_nodes();
-        let (octets, mut buf) = encode_len!(buf, nodes.len());
-        bytes += octets;
+        let mut buf = encode_len!(buf, bytes, nodes.len());
 
         assert_min_len!(buf, 34 * nodes.len());
         for (node, hash) in nodes {
-            let (octets, rest) = encode_len!(buf, *node);
-            bytes += octets;
-            buf = rest;
-
-            let (octets, rest) = hash.encode(buf)?;
-            bytes += octets;
-            buf = rest;
+            buf = encode_len!(buf, bytes, *node);
+            buf = hash.encode_chain(buf, &mut bytes)?;
         }
 
         Ok((bytes, buf))
@@ -711,8 +707,8 @@ impl Encode for pow::Proofs {
 impl<'buf> Decode<'buf> for pow::Proofs {
     type Error = Error;
 
-    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
-        let (desc, buf) = <&[u8]>::decode(buf)?;
+    fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
+        let (desc, buf) = <&[u8]>::raw_decode(buf)?;
         let (levels, buf) = decode_len!(buf);
         let (proofs, buf) = decode_len!(buf);
         let (len, mut buf) = decode_len!(buf);
@@ -722,7 +718,7 @@ impl<'buf> Decode<'buf> for pow::Proofs {
             let (node, rest) = decode_len!(buf);
             buf = rest;
 
-            let (hash, rest) = <[u8; 32]>::decode(buf)?;
+            let (hash, rest) = <[u8; 32]>::raw_decode(buf)?;
             buf = rest;
 
             nodes.insert(node, hash);
@@ -740,8 +736,8 @@ impl<'buf> Decode<'buf> for pow::Proofs {
 impl Encode for sparse::Hash {
     type Error = Error;
 
-    fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
-        <[u8; 32]>::encode(self.as_bytes(), buf)
+    fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
+        <[u8; 32]>::raw_encode(self.as_bytes(), buf)
     }
 }
 
@@ -749,8 +745,8 @@ impl Encode for sparse::Hash {
 impl Encode for sparse::Proof {
     type Error = Error;
 
-    fn encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
-        self.as_bytes().encode(buf)
+    fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
+        self.as_bytes().raw_encode(buf)
     }
 }
 
@@ -758,8 +754,8 @@ impl Encode for sparse::Proof {
 impl<'buf> Decode<'buf> for sparse::Hash {
     type Error = Error;
 
-    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
-        let (bytes, rest) = <[u8; 32]>::decode(buf)?;
+    fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
+        let (bytes, rest) = <[u8; 32]>::raw_decode(buf)?;
 
         Ok((Self::from(bytes), rest))
     }
@@ -769,8 +765,8 @@ impl<'buf> Decode<'buf> for sparse::Hash {
 impl<'buf> Decode<'buf> for sparse::Proof {
     type Error = Error;
 
-    fn decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
-        let (bytes, rest) = <&[u8]>::decode(buf)?;
+    fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
+        let (bytes, rest) = <&[u8]>::raw_decode(buf)?;
 
         Ok((Self::from_bytes(bytes)?, rest))
     }
@@ -790,6 +786,6 @@ impl From<ed25519::SignatureError> for Error {
 #[cfg(feature = "sp4r53")]
 impl From<sparse::Error> for Error {
     fn from(error: sparse::Error) -> Self {
-        Error::Sp4rs3(error)
+        Error::Sparse(error)
     }
 }
