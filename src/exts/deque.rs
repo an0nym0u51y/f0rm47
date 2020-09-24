@@ -18,15 +18,16 @@ use std::io::{self, Read, Write};
  * │                              impl {En,De}code for VecDeque<T>                              │ *
 \* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
-impl<T: Encode> Encode for VecDeque<T>
+impl<T> Encode for VecDeque<T>
 where
+    T: Encode,
     T::Error: From<io::Error>,
 {
     type Error = T::Error;
 
     fn size(&self) -> Result<usize, Self::Error> {
         if self.len() > u16::MAX as usize {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "buf.len() > u16::MAX").into());
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "queue.len() > u16::MAX").into());
         }
 
         let mut size = (self.len() as u16).fast_size();
@@ -43,7 +44,7 @@ where
 
     fn encode_into<W: Write>(&self, mut writer: W) -> Result<(), Self::Error> {
         if self.len() > u16::MAX as usize {
-            Err(io::Error::new(io::ErrorKind::InvalidInput, "buf.len() > u16::MAX").into())
+            Err(io::Error::new(io::ErrorKind::InvalidInput, "queue.len() > u16::MAX").into())
         } else {
             (self.len() as u16).encode_into(&mut writer)?;
             for elem in self {
@@ -55,9 +56,10 @@ where
     }
 }
 
-impl<T: Decode> Decode for VecDeque<T>
+impl<T> Decode for VecDeque<T>
 where
-    <T as Encode>::Error: From<io::Error>,
+    T: Decode,
+    T::Error: From<io::Error>,
 {
     fn decode_with_len_from<R: Read>(mut reader: R) -> Result<(Self, usize), Self::Error> {
         let (len, mut read) = u16::decode_with_len_from(&mut reader)?;

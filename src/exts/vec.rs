@@ -17,15 +17,16 @@ use std::io::{self, Read, Write};
  * │                                impl {En,De}code for Vec<T>                                 │ *
 \* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
-impl<T: Encode> Encode for Vec<T>
+impl<T> Encode for Vec<T>
 where
+    T: Encode,
     T::Error: From<io::Error>,
 {
     type Error = T::Error;
 
     default fn size(&self) -> Result<usize, Self::Error> {
         if self.len() > u16::MAX as usize {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "buf.len() > u16::MAX").into());
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "vec.len() > u16::MAX").into());
         }
 
         let mut size = (self.len() as u16).fast_size();
@@ -42,7 +43,7 @@ where
 
     default fn encode_into<W: Write>(&self, mut writer: W) -> Result<(), Self::Error> {
         if self.len() > u16::MAX as usize {
-            Err(io::Error::new(io::ErrorKind::InvalidInput, "buf.len() > u16::MAX").into())
+            Err(io::Error::new(io::ErrorKind::InvalidInput, "vec.len() > u16::MAX").into())
         } else {
             (self.len() as u16).encode_into(&mut writer)?;
             for elem in self {
@@ -54,9 +55,10 @@ where
     }
 }
 
-impl<T: Decode> Decode for Vec<T>
+impl<T> Decode for Vec<T>
 where
-    <T as Encode>::Error: From<io::Error>,
+    T: Decode,
+    T::Error: From<io::Error>,
 {
     default fn decode_with_len_from<R: Read>(mut reader: R) -> Result<(Self, usize), Self::Error> {
         let (len, mut read) = u16::decode_with_len_from(&mut reader)?;
@@ -87,7 +89,7 @@ impl Encode for Vec<u8> {
 
     fn encode_into<W: Write>(&self, mut writer: W) -> Result<(), Self::Error> {
         if self.len() > u16::MAX as usize {
-            Err(io::Error::new(io::ErrorKind::InvalidInput, "buf.len() > u16::MAX"))
+            Err(io::Error::new(io::ErrorKind::InvalidInput, "vec.len() > u16::MAX"))
         } else {
             (self.len() as u16).encode_into(&mut writer)?;
             writer.write_all(&self)
