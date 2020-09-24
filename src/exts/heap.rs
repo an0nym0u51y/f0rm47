@@ -39,7 +39,11 @@ where
     }
 
     fn fast_size(&self) -> usize {
-        (self.len() as u16).fast_size() + self.iter().next().map(|elem| elem.fast_size() * self.len()).unwrap_or(0)
+        if self.len() > u16::MAX as usize {
+            0
+        } else {
+            (self.len() as u16).fast_size() + self.iter().next().map(|elem| elem.fast_size() * self.len()).unwrap_or(0)
+        }
     }
 
     fn encode_into<W: Write>(&self, mut writer: W) -> Result<(), Self::Error> {

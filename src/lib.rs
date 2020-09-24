@@ -419,3 +419,24 @@ impl<const LEN: usize> Decode for [u8; LEN] {
         Ok((bytes, LEN))
     }
 }
+
+/* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
+ * │                                 impl {En,De}code for &[u8]                                 │ *
+\* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
+
+impl Encode for &[u8] {
+    type Error = io::Error;
+
+    fn fast_size(&self) -> usize {
+        self.len() + (self.len() as u16).fast_size()
+    }
+
+    fn encode_into<W: Write>(&self, mut writer: W) -> Result<(), Self::Error> {
+        if self.len() > u16::MAX as usize {
+            Err(io::Error::new(io::ErrorKind::InvalidInput, "buf.len() > u16::MAX"))
+        } else {
+            (self.len() as u16).encode_into(&mut writer)?;
+            writer.write_all(self)
+        }
+    }
+}

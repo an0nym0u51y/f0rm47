@@ -40,7 +40,9 @@ where
     }
 
     fn fast_size(&self) -> usize {
-        if self.is_empty() {
+        if self.len() > u16::MAX as usize {
+            0
+        } else if self.is_empty() {
             (0 as u16).fast_size()
         } else {
             let len = self.len();
@@ -109,7 +111,9 @@ where
     }
 
     fn fast_size(&self) -> usize {
-        if self.is_empty() {
+        if self.len() > u16::MAX as usize {
+            0
+        } else if self.is_empty() {
             (0 as u16).fast_size()
         } else {
             let len = self.len();
