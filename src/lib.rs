@@ -10,170 +10,320 @@
  * │                                       Configuration                                        │ *
 \* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
-#![cfg_attr(not(feature = "std"), no_std)]
+#![feature(min_const_generics, min_specialization)]
 
 /* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
  * │                                          Imports                                           │ *
 \* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
 use core::mem;
-
-#[cfg(feature = "std")]
-use core::hash::Hash;
-
-#[cfg(feature = "std")]
-use std::collections::{BTreeMap, HashMap};
-
-#[cfg(feature = "std")]
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
-
-#[cfg(feature = "error")]
-use thiserror::Error;
+use std::io::{self, Read, Write};
 
 /* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
  * │                                         Interfaces                                         │ *
 \* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
 pub trait Encode {
-    type Error: From<Error>;
+    type Error;
 
-    fn encode(&self, buf: &mut [u8]) -> Result<usize, Self::Error> {
-        Ok(self.raw_encode(buf)?.0)
+    fn size(&self) -> Result<usize, Self::Error> {
+        Ok(self.fast_size())
     }
 
-    fn encode_chain<'buf>(&self, buf: &'buf mut [u8], bytes: &mut usize) -> Result<&'buf mut [u8], Self::Error> {
-        let (octets, rest) = self.raw_encode(buf)?;
-        *bytes += octets;
+    fn fast_size(&self) -> usize;
 
-        Ok(rest)
+    fn encode(&self) -> Result<Vec<u8>, Self::Error> {
+        let mut buf = Vec::with_capacity(self.size()?);
+        self.encode_into(&mut buf)?;
+
+        Ok(buf)
     }
 
-    fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Self::Error>;
+    fn encode_into<W: Write>(&self, writer: W) -> Result<(), Self::Error>;
 }
 
-pub trait Decode<'buf>: Sized {
-    type Error: From<Error>;
-
-    fn decode(buf: &'buf [u8]) -> Result<Self, Self::Error> {
-        Ok(Self::raw_decode(buf)?.0)
+pub trait Decode: Encode + Sized {
+    fn decode(buf: &[u8]) -> Result<Self, Self::Error> {
+        Ok(Self::decode_with_len(buf)?.0)
     }
 
-    fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Self::Error>;
+    fn decode_from<R: Read>(reader: R) -> Result<Self, Self::Error> {
+        Ok(Self::decode_with_len_from(reader)?.0)
+    }
+
+    fn decode_with_len(buf: &[u8]) -> Result<(Self, usize), Self::Error> {
+        Self::decode_with_len_from(buf)
+    }
+
+    fn decode_with_len_from<R: Read>(reader: R) -> Result<(Self, usize), Self::Error>;
 }
 
 /* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
- * │                                           Types                                            │ *
+ * │                                     impl Encode for &T                                     │ *
 \* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
-#[derive(Debug)]
-#[cfg_attr(feature = "error", derive(Error))]
-pub enum Error {
-    #[cfg(feature = "ed25519")]
-    #[cfg_attr(feature = "error", error("ed25519-related error ({0})"))]
-    Ed25519(ed25519::SignatureError),
-    #[cfg_attr(feature = "error", error("invalid value"))]
-    InvalidValue,
-    #[cfg_attr(
-        feature = "error",
-        error("invalid length (max={max}, actual={actual})")
-    )]
-    MaxLen { max: usize, actual: usize },
-    #[cfg_attr(
-        feature = "error",
-        error("invalid length (min={min}, actual={actual})")
-    )]
-    MinLen { min: usize, actual: usize },
-    #[cfg(feature = "sp4r53")]
-    #[cfg_attr(feature = "error", error("sp4r53-related error ({0})"))]
-    Sparse(sparse::Error),
+impl<T: Encode + ?Sized> Encode for &T {
+    type Error = T::Error;
+   
+    fn size(&self) -> Result<usize, Self::Error> {
+        (**self).size()
+    }
+
+    fn fast_size(&self) -> usize {
+        (**self).fast_size()
+    }
+
+    fn encode(&self) -> Result<Vec<u8>, Self::Error> {
+        (**self).encode()
+    }
+
+    fn encode_into<W: Write>(&self, writer: W) -> Result<(), Self::Error> {
+        (**self).encode_into(writer)
+    }
+}
+
+/* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
+ * │                                impl {En,De}code for Box<T>                                 │ *
+\* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
+
+impl<T: Encode + ?Sized> Encode for Box<T> {
+    type Error = T::Error;
+
+    fn size(&self) -> Result<usize, Self::Error> {
+        (**self).size()
+    }
+
+    fn fast_size(&self) -> usize {
+        (**self).fast_size()
+    }
+
+    fn encode(&self) -> Result<Vec<u8>, Self::Error> {
+        (**self).encode()
+    }
+
+    fn encode_into<W: Write>(&self, writer: W) -> Result<(), Self::Error> {
+        (**self).encode_into(writer)
+    }
+}
+
+impl<T: Decode + ?Sized> Decode for Box<T> {
+    fn decode(buf: &[u8]) -> Result<Self, Self::Error> {
+        T::decode(buf).map(Box::new)
+    }
+
+    fn decode_from<R: Read>(reader: R) -> Result<Self, Self::Error> {
+        T::decode_from(reader).map(Box::new)
+    }
+
+    fn decode_with_len(buf: &[u8]) -> Result<(Self, usize), Self::Error> {
+        let (val, len) = T::decode_with_len(buf)?;
+        Ok((Box::new(val), len))
+    }
+
+    fn decode_with_len_from<R: Read>(reader: R) -> Result<(Self, usize), Self::Error> {
+        let (val, len) = T::decode_with_len_from(reader)?;
+        Ok((Box::new(val), len))
+    }
+}
+
+/* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
+ * │                                impl {En,De}code for Vec<T>                                 │ *
+\* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
+
+impl<T: Encode> Encode for Vec<T>
+where
+    T::Error: From<io::Error>,
+{
+    type Error = T::Error;
+
+    default fn size(&self) -> Result<usize, Self::Error> {
+        let mut size = (self.len() as u16).fast_size();
+        for elem in self {
+            size += elem.size()?;
+        }
+
+        Ok(size)
+    }
+
+    default fn fast_size(&self) -> usize {
+        (self.len() as u16).fast_size() + self[0].fast_size() * self.len()
+    }
+
+    default fn encode_into<W: Write>(&self, mut writer: W) -> Result<(), Self::Error> {
+        if self.len() > u16::MAX as usize {
+            Err(io::Error::new(io::ErrorKind::InvalidInput, "buf.len() > u16::MAX").into())
+        } else {
+            (self.len() as u16).encode_into(&mut writer)?;
+            for elem in self {
+                elem.encode_into(&mut writer)?;
+            }
+
+            Ok(())
+        }
+    }
+}
+
+impl<T: Decode> Decode for Vec<T>
+where
+    <T as Encode>::Error: From<io::Error>,
+{
+    default fn decode_with_len_from<R: Read>(mut reader: R) -> Result<(Self, usize), Self::Error> {
+        let (len, mut read) = u16::decode_with_len_from(&mut reader)?;
+        let mut elems = Vec::with_capacity(len as usize);
+
+        for _ in 0..len {
+            let (elem, readb) = T::decode_with_len_from(&mut reader)?;
+            elems.push(elem);
+            read += readb;
+        }
+
+        Ok((elems, read))
+    }
+}
+
+/* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
+ * │                               impl {En,De}code for Option<T>                               │ *
+\* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
+
+impl<T: Encode> Encode for Option<T>
+where
+    T::Error: From<io::Error>,
+{
+    type Error = T::Error;
+
+    fn size(&self) -> Result<usize, Self::Error> {
+        if let Some(val) = self {
+            Ok(val.size()? + true.fast_size())
+        } else {
+            Ok(false.fast_size())
+        }
+    }
+
+    fn fast_size(&self) -> usize {
+        if let Some(val) = self {
+            val.fast_size() + true.fast_size()
+        } else {
+            false.fast_size()
+        }
+    }
+
+    fn encode_into<W: Write>(&self, mut writer: W) -> Result<(), Self::Error> {
+        if let Some(val) = self {
+            true.encode_into(&mut writer)?;
+            val.encode_into(writer)
+        } else {
+            false.encode_into(&mut writer)?;
+            Ok(())
+        }
+    }
+}
+
+impl<T: Decode> Decode for Option<T>
+where
+    T::Error: From<io::Error>,
+{
+    fn decode_with_len_from<R: Read>(mut reader: R) -> Result<(Self, usize), Self::Error> {
+        match bool::decode_with_len_from(&mut reader)? {
+            (true, read1) => {
+                let (val, read2) = T::decode_with_len_from(reader)?;
+                Ok((Some(val), read1 + read2))
+            }
+            (false, read) => Ok((None, read))
+        }
+    }
 }
 
 /* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
  * │                                           Macros                                           │ *
 \* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
-macro_rules! assert_min_len {
-    ($buf:ident, $min:expr) => {{
-        let min = $min;
-        if $buf.len() < min {
-            return Err(Error::MinLen {
-                min,
-                actual: $buf.len(),
-            }
-            .into());
-        }
-    }};
-}
-
-macro_rules! encode_len {
-    ($buf:ident, $bytes:ident, $len:expr) => {{
-        let len = $len;
-        if len > u16::MAX as usize {
-            return Err(Error::MaxLen {
-                max: u16::MAX as usize,
-                actual: len,
-            }
-            .into());
-        }
-
-        (len as u16).encode_chain($buf, &mut $bytes)?
-    }};
-}
-
-macro_rules! decode_len {
-    ($buf:ident) => {{
-        let (len, buf) = u16::raw_decode($buf)?;
-        (len as usize, buf)
-    }};
-}
-
 macro_rules! primitive {
     ($primitive:ty) => {
         impl Encode for $primitive {
-            type Error = Error;
+            type Error = io::Error;
 
-            fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
-                self.to_le_bytes().raw_encode(buf)
+            fn fast_size(&self) -> usize {
+                mem::size_of::<$primitive>()
+            }
+
+            fn encode_into<W: Write>(&self, mut writer: W) -> Result<(), Self::Error> {
+                writer.write_all(&self.to_le_bytes())
             }
         }
 
-        impl<'buf> Decode<'buf> for $primitive {
-            type Error = Error;
+        impl Decode for $primitive {
+            fn decode_with_len(buf: &[u8]) -> Result<(Self, usize), Self::Error> {
+                let bytes = <[u8; mem::size_of::<$primitive>()]>::decode(buf)?;
+                Ok((Self::from_le_bytes(bytes), mem::size_of::<$primitive>()))
+            }
 
-            fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
-                let (bytes, buf) = <[u8; mem::size_of::<$primitive>()]>::raw_decode(buf)?;
-                Ok((<$primitive>::from_le_bytes(bytes), buf))
+            fn decode_with_len_from<R: Read>(reader: R) -> Result<(Self, usize), Self::Error> {
+                let bytes = <[u8; mem::size_of::<$primitive>()]>::decode_from(reader)?;
+                Ok((Self::from_le_bytes(bytes), mem::size_of::<$primitive>()))
             }
         }
     };
 }
 
-macro_rules! bytes {
-    ([u8; $size:literal]) => {
-        impl Encode for [u8; $size] {
-            type Error = Error;
+macro_rules! tuple {
+    ($($idx:tt: $name:ident),+) => {
+        impl<Err, $($name),+> Encode for ($($name),+)
+        where
+            $($name: Encode<Error = Err>,)+
+        {
+            type Error = Err;
 
-            fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
-                assert_min_len!(buf, $size);
+            fn size(&self) -> Result<usize, Self::Error> {
+                Ok($(self.$idx.size()? +)+ 0)
+            }
 
-                buf[0..$size].copy_from_slice(self);
+            fn fast_size(&self) -> usize {
+                $(self.$idx.fast_size() +)+ 0
+            }
 
-                Ok(($size, &mut buf[$size..]))
+            fn encode_into<W: Write>(&self, mut writer: W) -> Result<(), Self::Error> {
+                $(self.$idx.encode_into(&mut writer)?;)+
+                Ok(())
             }
         }
 
-        impl<'buf> Decode<'buf> for [u8; $size] {
-            type Error = Error;
+        impl<Err, $($name),+> Decode for ($($name),+)
+        where
+            $($name: Encode<Error = Err> + Decode,)+
+        {
+            #[allow(clippy::eval_order_dependence)]
+            fn decode_with_len_from<R: Read>(mut reader: R) -> Result<(Self, usize), Self::Error> {
+                let mut len = 0;
+                let val = (
+                    $({
+                        let (val, read) = <$name>::decode_with_len_from(&mut reader)?;
+                        len += read;
+                        val
+                    },)+
+                );
 
-            fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
-                assert_min_len!(buf, $size);
-
-                let mut bytes = [0; $size];
-                bytes[..].copy_from_slice(&buf[0..$size]);
-
-                Ok((bytes, &buf[$size..]))
+                Ok((val, len))
             }
         }
+    };
+}
+
+macro_rules! tuples {
+    ($idx1:tt: $name1:ident, $idx2:tt: $name2:ident $(, $($idx:tt: $name:ident),+)?) => {
+        tuples!(@INTERNAL; ($idx1: $name1, $idx2: $name2) ($($($idx: $name),+)?));
+    };
+
+    (@INTERNAL;
+     ($($idx:tt: $name:ident),+) ()
+    ) => {
+        tuple!($($idx: $name),+);
+    };
+
+    (@INTERNAL;
+     ($($idx:tt: $name:ident),+) ($oidx:tt: $oname:ident $(, $($ridx:tt: $rname:ident),+)?)
+    ) => {
+        tuple!($($idx: $name),+);
+        tuples!(@INTERNAL; ($($idx: $name),+, $oidx: $oname) ($($($ridx: $rname),+)?));
     };
 }
 
@@ -181,611 +331,125 @@ macro_rules! bytes {
  * │                                       primitive!(..)                                       │ *
 \* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
+primitive!(u8);
 primitive!(u16);
 primitive!(u32);
 primitive!(u64);
+primitive!(u128);
 
+primitive!(i8);
 primitive!(i16);
 primitive!(i32);
 primitive!(i64);
+primitive!(i128);
 
 /* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
- * │                                         bytes!(..)                                         │ *
+ * │                                        tuples!(..)                                         │ *
 \* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
-bytes!([u8; 2]);
-bytes!([u8; 4]);
-bytes!([u8; 8]);
-bytes!([u8; 16]);
-bytes!([u8; 32]);
-bytes!([u8; 64]);
+tuples!(0: A, 1: B, 2: C, 3: D, 4: E, 5: F, 6: G, 7: H, 8: I, 9: J, 10: K, 11: L, 12: M);
 
 /* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
- * │                             impl {En,De}code for {Box<T>,[T]}                              │ *
+ * │                                 impl {En,De}code for bool                                  │ *
 \* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
-impl<T: Encode> Encode for Box<T> {
-    type Error = T::Error;
+impl Encode for bool {
+    type Error = io::Error;
 
-    fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), T::Error> {
-        T::raw_encode(&**self, buf)
+    fn fast_size(&self) -> usize {
+        (*self as u8).fast_size()
+    }
+
+    fn encode_into<W: Write>(&self, writer: W) -> Result<(), Self::Error> {
+        (*self as u8).encode_into(writer)
     }
 }
 
-impl<T: Encode> Encode for [T] {
-    type Error = T::Error;
-
-    fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), T::Error> {
-        let mut bytes = 0;
-        let mut buf = encode_len!(buf, bytes, self.len());
-
-        for elem in self {
-            buf = elem.encode_chain(buf, &mut bytes)?;
+impl Decode for bool {
+    fn decode_with_len(buf: &[u8]) -> Result<(Self, usize), Self::Error> {
+        let (val, len) = u8::decode_with_len(buf)?;
+        match val {
+            0 => Ok((false, len)),
+            1 => Ok((true, len)),
+            _ => Err(io::Error::new(io::ErrorKind::InvalidData, "expected 0u8 or 1u8")),
         }
-
-        Ok((bytes, buf))
     }
-}
 
-impl<'buf, T: Decode<'buf>> Decode<'buf> for Box<T> {
-    type Error = T::Error;
-
-    fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), T::Error> {
-        let (val, buf) = T::raw_decode(buf)?;
-        Ok((Box::new(val), buf))
-    }
-}
-
-impl<'buf, T: Decode<'buf>> Decode<'buf> for Vec<T> {
-    type Error = T::Error;
-
-    fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), T::Error> {
-        let (len, mut buf) = decode_len!(buf);
-
-        let mut elems = Vec::with_capacity(len);
-        for _ in 0..len {
-            let (elem, rest) = T::raw_decode(buf)?;
-
-            elems.push(elem);
-            buf = rest;
+    fn decode_with_len_from<R: Read>(reader: R) -> Result<(Self, usize), Self::Error> {
+        let (val, len) = u8::decode_with_len_from(reader)?;
+        match val {
+            0 => Ok((false, len)),
+            1 => Ok((true, len)),
+            _ => Err(io::Error::new(io::ErrorKind::InvalidData, "expected 0u8 or 1u8")),
         }
-
-        Ok((elems, buf))
     }
 }
 
 /* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
- * │                                 impl {En,De}code for [u8]                                  │ *
+ * │                                impl {En,De}code for [u8; _]                                │ *
 \* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
-impl Encode for [u8] {
-    type Error = Error;
+impl<const LEN: usize> Encode for [u8; LEN] {
+    type Error = io::Error;
 
-    fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
-        let mut bytes = 0;
-        let buf = encode_len!(buf, bytes, self.len());
+    fn fast_size(&self) -> usize {
+        LEN
+    }
 
-        buf[0..self.len()].copy_from_slice(self);
-
-        Ok((bytes + self.len(), &mut buf[self.len()..]))
+    fn encode_into<W: Write>(&self, mut writer: W) -> Result<(), Self::Error> {
+        writer.write_all(self)
     }
 }
 
-impl<'buf> Decode<'buf> for &'buf [u8] {
-    type Error = Error;
+impl<const LEN: usize> Decode for [u8; LEN] {
+    fn decode_with_len(buf: &[u8]) -> Result<(Self, usize), Self::Error> {
+        if buf.len() < LEN {
+            Err(io::Error::new(io::ErrorKind::UnexpectedEof, "not enough data"))
+        } else {
+            let mut bytes = [0; LEN];
+            bytes[..].copy_from_slice(&buf[..LEN]);
 
-    fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
-        let (len, buf) = decode_len!(buf);
-        assert_min_len!(buf, len);
-
-        Ok(buf.split_at(len))
+            Ok((bytes, LEN))
+        }
     }
-}
 
-impl<'buf> Decode<'buf> for Vec<u8> {
-    type Error = Error;
+    fn decode_with_len_from<R: Read>(mut reader: R) -> Result<(Self, usize), Self::Error> {
+        let mut bytes = [0; LEN];
+        reader.read_exact(&mut bytes)?;
 
-    fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
-        let (len, buf) = decode_len!(buf);
-        assert_min_len!(buf, len);
-
-        let (bytes, rest) = buf.split_at(len);
-        Ok((Vec::from(bytes), rest))
+        Ok((bytes, LEN))
     }
 }
 
 /* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
- * │                            impl {En,De}code for {Hash,BTree}Map                            │ *
+ * │                                impl {En,De}code for Vec<u8>                                │ *
 \* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
-#[cfg(feature = "std")]
-impl<K, V, E> Encode for HashMap<K, V>
-where
-    K: Encode<Error = E>,
-    V: Encode<Error = E>,
-    E: From<Error>,
-{
-    type Error = E;
-
-    fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), E> {
-        let mut bytes = 0;
-        let mut buf = encode_len!(buf, bytes, self.len());
-        for (key, value) in self {
-            buf = key.encode_chain(buf, &mut bytes)?;
-            buf = value.encode_chain(buf, &mut bytes)?;
-        }
-
-        Ok((bytes, buf))
+impl Encode for Vec<u8> {
+    fn size(&self) -> Result<usize, Self::Error> {
+        Ok(self.fast_size())
     }
-}
 
-#[cfg(feature = "std")]
-impl<K, V, E> Encode for BTreeMap<K, V>
-where
-    K: Encode<Error = E>,
-    V: Encode<Error = E>,
-    E: From<Error>,
-{
-    type Error = E;
-
-    fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), E> {
-        let mut bytes = 0;
-        let mut buf = encode_len!(buf, bytes, self.len());
-        for (key, value) in self {
-            buf = key.encode_chain(buf, &mut bytes)?;
-            buf = value.encode_chain(buf, &mut bytes)?;
-        }
-
-        Ok((bytes, buf))
+    fn fast_size(&self) -> usize {
+        self.len() + (self.len() as u16).fast_size()
     }
-}
 
-#[cfg(feature = "std")]
-impl<'buf, K, V, E> Decode<'buf> for HashMap<K, V>
-where
-    K: Decode<'buf, Error = E> + Hash + Eq,
-    V: Decode<'buf, Error = E>,
-    E: From<Error>,
-{
-    type Error = E;
-
-    fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), E> {
-        let (len, mut buf) = decode_len!(buf);
-
-        let mut map = HashMap::with_capacity(len);
-        for _ in 0..len {
-            let (key, rest) = K::raw_decode(buf)?;
-            buf = rest;
-
-            let (value, rest) = V::raw_decode(buf)?;
-            buf = rest;
-
-            map.insert(key, value);
-        }
-
-        Ok((map, buf))
-    }
-}
-
-#[cfg(feature = "std")]
-impl<'buf, K, V, E> Decode<'buf> for BTreeMap<K, V>
-where
-    K: Decode<'buf, Error = E> + Ord,
-    V: Decode<'buf, Error = E>,
-    E: From<Error>,
-{
-    type Error = E;
-
-    fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), E> {
-        let (len, mut buf) = decode_len!(buf);
-       
-        let mut map = BTreeMap::new();
-        for _ in 0..len {
-            let (key, rest) = K::raw_decode(buf)?;
-            buf = rest;
-
-            let (value, rest) = V::raw_decode(buf)?;
-            buf = rest;
-
-            map.insert(key, value);
-        }
-
-        Ok((map, buf))
-    }
-}
-
-/* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
- * │                            impl {En,De}code for Ip{,v4,v6}Addr                             │ *
-\* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
-
-#[cfg(feature = "std")]
-impl Encode for IpAddr {
-    type Error = Error;
-
-    fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
-        match self {
-            IpAddr::V4(addr) => {
-                assert_min_len!(buf, 5);
-                buf[0] = 4u8.to_le();
-
-                let (bytes, buf) = addr.raw_encode(&mut buf[1..])?;
-                Ok((bytes + 1, buf))
-            }
-            IpAddr::V6(addr) => {
-                assert_min_len!(buf, 17);
-                buf[0] = 16u8.to_le();
-
-                let (bytes, buf) = addr.raw_encode(&mut buf[1..])?;
-                Ok((bytes + 1, buf))
-            }
+    fn encode_into<W: Write>(&self, mut writer: W) -> Result<(), Self::Error> {
+        if self.len() > u16::MAX as usize {
+            Err(io::Error::new(io::ErrorKind::InvalidInput, "buf.len() > u16::MAX"))
+        } else {
+            (self.len() as u16).encode_into(&mut writer)?;
+            writer.write_all(&self)
         }
     }
 }
 
-#[cfg(feature = "std")]
-impl Encode for Ipv4Addr {
-    type Error = Error;
-
-    fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
-        self.octets().raw_encode(buf)
-    }
-}
-
-#[cfg(feature = "std")]
-impl Encode for Ipv6Addr {
-    type Error = Error;
-
-    fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
-        self.octets().raw_encode(buf)
-    }
-}
-
-
-#[cfg(feature = "std")]
-impl<'buf> Decode<'buf> for IpAddr {
-    type Error = Error;
-
-    fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
-        assert_min_len!(buf, 5);
-        match u8::from_le(buf[0]) {
-            4 => {
-                let (addr, rest) = Ipv4Addr::raw_decode(&buf[1..])?;
-                Ok((IpAddr::V4(addr), rest))
-            },
-            6 => {
-                let (addr, rest) = Ipv6Addr::raw_decode(&buf[1..])?;
-                Ok((IpAddr::V6(addr), rest))
-            },
-            _ => Err(Error::InvalidValue),
-        }
-    }
-}
-
-#[cfg(feature = "std")]
-impl<'buf> Decode<'buf> for Ipv4Addr {
-    type Error = Error;
-
-    fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
-        let (bytes, rest) = <[u8; 4]>::raw_decode(buf)?;
-        Ok((Self::from(bytes), rest))
-    }
-}
-
-#[cfg(feature = "std")]
-impl<'buf> Decode<'buf> for Ipv6Addr {
-    type Error = Error;
-
-    fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
-        let (bytes, rest) = <[u8; 16]>::raw_decode(buf)?;
-        Ok((Self::from(bytes), rest))
-    }
-}
-
-/* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
- * │                     impl {En,De}code for std::net::SocketAddr{,V4,V6}                      │ *
-\* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
-
-#[cfg(feature = "std")]
-impl Encode for SocketAddr {
-    type Error = Error;
-
-    fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
-        match self {
-            SocketAddr::V4(addr) => {
-                assert_min_len!(buf, 7);
-                buf[0] = 4u8.to_le();
-
-                let (bytes, buf) = addr.raw_encode(&mut buf[1..])?;
-                Ok((bytes + 1, buf))
-            },
-            SocketAddr::V6(addr) => {
-                assert_min_len!(buf, 27);
-                buf[0] = 6u8.to_le();
-
-                let (bytes, buf) = addr.raw_encode(&mut buf[1..])?;
-                Ok((bytes + 1, buf))
-            },
-        }
-    }
-}
-
-#[cfg(feature = "std")]
-impl Encode for SocketAddrV4 {
-    type Error = Error;
-
-    fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
-        let (bytes, buf) = self.ip().raw_encode(buf)?;
-        let (octets, buf) = self.port().raw_encode(buf)?;
-
-        Ok((bytes + octets, buf))
-    }
-}
-
-#[cfg(feature = "std")]
-impl Encode for SocketAddrV6 {
-    type Error = Error;
-
-    fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
-        let (mut bytes, buf) = self.ip().raw_encode(buf)?;
-
-        let (octets, buf) = self.port().raw_encode(buf)?;
-        bytes += octets;
-
-        let (octets, buf) = self.flowinfo().raw_encode(buf)?;
-        bytes += octets;
-
-        let (octets, buf) = self.scope_id().raw_encode(buf)?;
-        bytes += octets;
-
-        Ok((bytes + octets, buf))
-    }
-}
-
-#[cfg(feature = "std")]
-impl<'buf> Decode<'buf> for SocketAddr {
-    type Error = Error;
-
-    fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
-        assert_min_len!(buf, 7);
-        match u8::from_le(buf[0]) {
-            4 => {
-                let (addr, rest) = SocketAddrV4::raw_decode(&buf[1..])?;
-                Ok((SocketAddr::V4(addr), rest))
-            },
-            6 => {
-                let (addr, rest) = SocketAddrV6::raw_decode(&buf[1..])?;
-                Ok((SocketAddr::V6(addr), rest))
-            }
-            _ => Err(Error::InvalidValue)
-        }
-    }
-}
-
-#[cfg(feature = "std")]
-impl<'buf> Decode<'buf> for SocketAddrV4 {
-    type Error = Error;
-
-    fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
-        let (ip, buf) = Ipv4Addr::raw_decode(buf)?;
-        let (port, buf) = u16::raw_decode(buf)?;
-
-        Ok((Self::new(ip, port), buf))
-    }
-}
-
-#[cfg(feature = "std")]
-impl<'buf> Decode<'buf> for SocketAddrV6 {
-    type Error = Error;
-
-    fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
-        let (ip, buf) = Ipv6Addr::raw_decode(buf)?;
-        let (port, buf) = u16::raw_decode(buf)?;
-        let (flowinfo, buf) = u32::raw_decode(buf)?;
-        let (scope_id, buf) = u32::raw_decode(buf)?;
-
-        Ok((Self::new(ip, port, flowinfo, scope_id), buf))
-    }
-}
-
-/* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
- * │                       impl {En,De}code for chrono::{,Naive}DateTime                        │ *
-\* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
-
-#[cfg(feature = "chrono")]
-impl Encode for chrono::DateTime<chrono::Utc> {
-    type Error = Error;
-
-    fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
-        self.naive_utc().raw_encode(buf)
-    }
-}
-
-#[cfg(feature = "chrono")]
-impl Encode for chrono::NaiveDateTime {
-    type Error = Error;
-
-    fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
-        self.timestamp().raw_encode(buf)
-    }
-}
-
-#[cfg(feature = "chrono")]
-impl<'buf> Decode<'buf> for chrono::DateTime<chrono::Utc> {
-    type Error = Error;
-
-    fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
-        let (time, buf) = chrono::NaiveDateTime::raw_decode(buf)?;
-
-        Ok((Self::from_utc(time, chrono::Utc), buf))
-    }
-}
-
-#[cfg(feature = "chrono")]
-impl<'buf> Decode<'buf> for chrono::NaiveDateTime {
-    type Error = Error;
-
-    fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
-        let (time, buf) = i64::raw_decode(buf)?;
-
-        Ok((Self::from_timestamp(time, 0), buf))
-    }
-}
-
-/* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
- * │                    imlp {En,De}code for ed25519::{PublicKey,Signature}                     │ *
-\* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
-
-#[cfg(feature = "ed25519")]
-impl Encode for ed25519::PublicKey {
-    type Error = Error;
-
-    fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
-        self.as_bytes().raw_encode(buf)
-    }
-}
-
-#[cfg(feature = "ed25519")]
-impl Encode for ed25519::Signature {
-    type Error = Error;
-
-    fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
-        self.to_bytes().raw_encode(buf)
-    }
-}
-
-#[cfg(feature = "ed25519")]
-impl<'buf> Decode<'buf> for ed25519::PublicKey {
-    type Error = Error;
-
-    fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
-        let (bytes, buf) = <[u8; ed25519::PUBLIC_KEY_LENGTH]>::raw_decode(buf)?;
-
-        Ok((Self::from_bytes(&bytes)?, buf))
-    }
-}
-
-#[cfg(feature = "ed25519")]
-impl<'buf> Decode<'buf> for ed25519::Signature {type Error = Error;
-
-    fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
-        let (bytes, buf) = <[u8; ed25519::SIGNATURE_LENGTH]>::raw_decode(buf)?;
-
-        Ok((Self::from(bytes), buf))
-    }
-}
-
-/* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
- * │                              impl {En,De}code for pow::Proofs                              │ *
-\* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
-
-#[cfg(feature = "p0w")]
-impl Encode for pow::Proofs {
-    type Error = Error;
-
-    fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
-        let mut bytes = 0;
-        let desc = self.description();
-        let buf = desc.encode_chain(buf, &mut bytes)?;
-
-        let buf = encode_len!(buf, bytes, self.levels());
-        let buf = encode_len!(buf, bytes, self.proofs());
-
-        let nodes = self.as_nodes();
-        let mut buf = encode_len!(buf, bytes, nodes.len());
-
-        assert_min_len!(buf, 34 * nodes.len());
-        for (node, hash) in nodes {
-            buf = encode_len!(buf, bytes, *node);
-            buf = hash.encode_chain(buf, &mut bytes)?;
-        }
-
-        Ok((bytes, buf))
-    }
-}
-
-#[cfg(feature = "p0w")]
-impl<'buf> Decode<'buf> for pow::Proofs {
-    type Error = Error;
-
-    fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
-        let (desc, buf) = <&[u8]>::raw_decode(buf)?;
-        let (levels, buf) = decode_len!(buf);
-        let (proofs, buf) = decode_len!(buf);
-        let (len, mut buf) = decode_len!(buf);
-
-        let mut nodes = BTreeMap::new();
-        for _ in 0..len {
-            let (node, rest) = decode_len!(buf);
-            buf = rest;
-
-            let (hash, rest) = <[u8; 32]>::raw_decode(buf)?;
-            buf = rest;
-
-            nodes.insert(node, hash);
-        }
-
-        Ok((Self::new(desc, levels, proofs, nodes), buf))
-    }
-}
-
-/* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
- * │                         impl {En,De}code for sparse::{Hash,Proof}                          │ *
-\* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
-
-#[cfg(feature = "sp4r53")]
-impl Encode for sparse::Hash {
-    type Error = Error;
-
-    fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
-        <[u8; 32]>::raw_encode(self.as_bytes(), buf)
-    }
-}
-
-#[cfg(feature = "sp4r53")]
-impl Encode for sparse::Proof {
-    type Error = Error;
-
-    fn raw_encode<'buf>(&self, buf: &'buf mut [u8]) -> Result<(usize, &'buf mut [u8]), Error> {
-        self.as_bytes().raw_encode(buf)
-    }
-}
-
-#[cfg(feature = "sp3r53")]
-impl<'buf> Decode<'buf> for sparse::Hash {
-    type Error = Error;
-
-    fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
-        let (bytes, rest) = <[u8; 32]>::raw_decode(buf)?;
-
-        Ok((Self::from(bytes), rest))
-    }
-}
-
-#[cfg(feature = "sp4r53")]
-impl<'buf> Decode<'buf> for sparse::Proof {
-    type Error = Error;
-
-    fn raw_decode(buf: &'buf [u8]) -> Result<(Self, &'buf [u8]), Error> {
-        let (bytes, rest) = <&[u8]>::raw_decode(buf)?;
-
-        Ok((Self::from_bytes(bytes)?, rest))
-    }
-}
-
-/* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
- * │                                   impl From<*> for Error                                   │ *
-\* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
-
-#[cfg(feature = "ed25519")]
-impl From<ed25519::SignatureError> for Error {
-    fn from(error: ed25519::SignatureError) -> Self {
-        Error::Ed25519(error)
-    }
-}
-
-#[cfg(feature = "sp4r53")]
-impl From<sparse::Error> for Error {
-    fn from(error: sparse::Error) -> Self {
-        Error::Sparse(error)
+impl Decode for Vec<u8> {
+    fn decode_with_len_from<R: Read>(mut reader: R) -> Result<(Self, usize), Self::Error> {
+        let (len, read) = u16::decode_with_len_from(&mut reader)?;
+        let mut data = vec![0; len as usize];
+        reader.read_exact(&mut data)?;
+
+        Ok((data, read + len as usize))
     }
 }
