@@ -61,11 +61,11 @@ pub trait Decode: Encode + Sized {
 }
 
 pub trait DecodeRef: Encode {
-    fn decode_ref<'buf>(buf: &'buf [u8]) -> Result<&'buf Self, Self::Error> {
+    fn decode_ref(buf: &[u8]) -> Result<&Self, Self::Error> {
         Ok(Self::decode_ref_with_len(buf)?.0)
     }
 
-    fn decode_ref_with_len<'buf>(buf: &'buf [u8]) -> Result<(&'buf Self, usize), Self::Error>;
+    fn decode_ref_with_len(buf: &[u8]) -> Result<(&Self, usize), Self::Error>;
 }
 
 /* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
@@ -450,7 +450,7 @@ impl Encode for [u8] {
 }
 
 impl DecodeRef for [u8] {
-    fn decode_ref_with_len<'buf>(buf: &'buf [u8]) -> Result<(&'buf Self, usize), Self::Error> {
+    fn decode_ref_with_len(buf: &[u8]) -> Result<(&Self, usize), Self::Error> {
         let (len, read) = u16::decode_with_len(buf)?;
         let len = len as usize;
 
