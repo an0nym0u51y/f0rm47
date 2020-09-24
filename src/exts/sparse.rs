@@ -49,3 +49,36 @@ impl Decode for Proof {
         }
     }
 }
+
+/* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
+ * │                                          #[test]                                           │ *
+\* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
+
+#[cfg(test)]
+#[test]
+fn sparse_proof() {
+    use sparse::{blake3, Tree};
+
+    let foo = blake3::hash(b"foo");
+    let bar = blake3::hash(b"bar");
+    let baz = blake3::hash(b"baz");
+
+    let mut tree = Tree::new();
+    tree.insert(foo);
+    tree.insert(bar);
+    tree.insert(baz);
+    tree.flush();
+
+    let proof = tree.proove(&[foo, baz]).unwrap();
+
+    let encoded1 = proof.as_bytes();
+    assert_eq!(proof.fast_size(), encoded1.len());
+
+    let encoded2 = proof.encode().unwrap();
+    assert_eq!(encoded1[..], encoded2[2..]);
+
+    let decoded1 = Proof::decode(&encoded2).unwrap();
+    let decoded2 = Proof::decode_from(encoded2.as_slice()).unwrap();
+    assert_eq!(decoded1, decoded2);
+    assert_eq!(decoded1, proof);
+}
