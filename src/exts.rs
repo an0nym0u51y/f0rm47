@@ -10,8 +10,11 @@
  * │                                          Imports                                           │ *
 \* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
-#[cfg(feature = "collections")]
-mod collections;
+#[cfg(feature = "map")]
+mod map;
 
 #[cfg(feature = "net")]
 mod net;
+
+#[cfg(feature = "set")]
+mod set;
