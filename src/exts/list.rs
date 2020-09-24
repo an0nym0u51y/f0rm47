@@ -15,7 +15,7 @@ use std::collections::LinkedList;
 use std::io::{self, Read, Write};
 
 /* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
- * │                              impl {En,De}code for LinkedList                               │ *
+ * │                             impl {En,De}code for LinkedList<T>                             │ *
 \* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
 impl<T> Encode for LinkedList<T>
