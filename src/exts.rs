@@ -10,17 +10,23 @@
  * │                                          Imports                                           │ *
 \* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
-#[cfg(feature = "list")]
-mod list;
+use cfg_if::cfg_if;
 
-#[cfg(feature = "map")]
-mod map;
+/* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
+ * │                                       cfg_if! { .. }                                       │ *
+\* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
-#[cfg(feature = "net")]
-mod net;
+cfg_if! {
+    if #[cfg(feature = "collections")] {
+        mod list;
+        mod map;
+        mod set;
+        mod vec;
+    }
+}
 
-#[cfg(feature = "set")]
-mod set;
-
-#[cfg(feature = "vec")]
-mod vec;
+cfg_if! {
+    if #[cfg(feature = "net")] {
+        mod net;
+    }
+}

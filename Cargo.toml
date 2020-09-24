@@ -15,9 +15,8 @@ publish = false
 
 [features]
 default = ["collections", "net"]
-collections = ["list", "map", "set", "vec"]
-list = []
-map = []
+collections = []
 net = []
-set = []
-vec = []
+
+[dependencies]
+cfg-if = "0.1"
