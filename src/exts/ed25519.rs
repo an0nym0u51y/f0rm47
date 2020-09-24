@@ -10,37 +10,56 @@
  * │                                          Imports                                           │ *
 \* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
-use cfg_if::cfg_if;
+use crate::{Decode, Encode};
+use ed25519::{PublicKey, Signature};
+use std::io::{self, Read, Write};
 
 /* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
- * │                                       cfg_if! { .. }                                       │ *
+ * │                               impl {En,De}code for PublicKey                               │ *
 \* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
-cfg_if! {
-    if #[cfg(feature = "chrono")] {
-        mod chrono;
+impl Encode for PublicKey {
+    type Error = io::Error;
+
+    fn fast_size(&self) -> usize {
+        self.to_bytes().fast_size()
+    }
+
+    fn encode_into<W: Write>(&self, writer: W) -> Result<(), Self::Error> {
+        self.to_bytes().encode_into(writer)
     }
 }
 
-cfg_if! {
-    if #[cfg(feature = "collections")] {
-        mod deque;
-        mod heap;
-        mod list;
-        mod map;
-        mod set;
-        mod vec;
+impl Decode for PublicKey {
+    fn decode_with_len_from<R: Read>(reader: R) -> Result<(Self, usize), Self::Error> {
+        let (bytes, read) = <[u8; 32]>::decode_with_len_from(reader)?;
+        if let Ok(key) = PublicKey::from_bytes(&bytes) {
+            Ok((key, read))
+        } else {
+            Err(io::Error::new(io::ErrorKind::InvalidData, "invalid public key"))
+        }
     }
 }
 
-cfg_if! {
-    if #[cfg(feature = "ed25519")] {
-        mod ed25519;
+/* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
+ * │                               impl {En,De}code for Signature                               │ *
+\* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
+
+impl Encode for Signature {
+    type Error = io::Error;
+
+    fn fast_size(&self) -> usize {
+        self.to_bytes().fast_size()
+    }
+
+    fn encode_into<W: Write>(&self, writer: W) -> Result<(), Self::Error> {
+        self.to_bytes().encode_into(writer)
     }
 }
 
-cfg_if! {
-    if #[cfg(feature = "net")] {
-        mod net;
+impl Decode for Signature {
+    fn decode_with_len_from<R: Read>(reader: R) -> Result<(Self, usize), Self::Error> {
+        let (bytes, read) = <[u8; 64]>::decode_with_len_from(reader)?;
+        Ok((Signature::from(bytes), read))
     }
 }
