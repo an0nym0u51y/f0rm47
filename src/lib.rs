@@ -392,6 +392,58 @@ impl Decode for bool {
 }
 
 /* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
+ * │                             impl {En,De}code for {usize,isize}                             │ *
+\* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
+
+impl Encode for usize {
+    type Error = io::Error;
+
+    fn fast_size(&self) -> usize {
+        (*self as u64).fast_size()
+    }
+
+    fn encode_into<W: Write>(&self, writer: W) -> Result<(), Self::Error> {
+        (*self as u64).encode_into(writer)
+    }
+}
+
+impl Encode for isize {
+    type Error = io::Error;
+
+    fn fast_size(&self) -> usize {
+        (*self as i64).fast_size()
+    }
+
+    fn encode_into<W: Write>(&self, writer: W) -> Result<(), Self::Error> {
+        (*self as i64).encode_into(writer)
+    }
+}
+
+impl Decode for usize {
+    fn decode_with_len(buf: &[u8]) -> Result<(Self, usize), Self::Error> {
+        let (num, len) = u64::decode_with_len(buf)?;
+        Ok((num as usize, len))
+    }
+
+    fn decode_with_len_from<R: Read>(reader: R) -> Result<(Self, usize), Self::Error> {
+        let (num, len) = u64::decode_with_len_from(reader)?;
+        Ok((num as usize, len))
+    }
+}
+
+impl Decode for isize {
+    fn decode_with_len(buf: &[u8]) -> Result<(Self, usize), Self::Error> {
+        let (num, len) = i64::decode_with_len(buf)?;
+        Ok((num as isize, len))
+    }
+
+    fn decode_with_len_from<R: Read>(reader: R) -> Result<(Self, usize), Self::Error> {
+        let (num, len) = i64::decode_with_len_from(reader)?;
+        Ok((num as isize, len))
+    }
+}
+
+/* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
  * │                                impl {En,De}code for [u8; _]                                │ *
 \* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
