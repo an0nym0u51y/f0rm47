@@ -17,6 +17,12 @@ use cfg_if::cfg_if;
 \* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
 cfg_if! {
+    if #[cfg(feature = "chrono")] {
+        mod chrono;
+    }
+}
+
+cfg_if! {
     if #[cfg(feature = "collections")] {
         mod deque;
         mod heap;
