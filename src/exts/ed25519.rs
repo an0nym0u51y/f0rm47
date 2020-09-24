@@ -63,3 +63,42 @@ impl Decode for Signature {
         Ok((Signature::from(bytes), read))
     }
 }
+
+/* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
+ * │                                          #[test]                                           │ *
+\* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
+
+#[cfg(test)]
+#[test]
+fn public_key() {
+    use rand::rngs::OsRng;
+    use ed25519::{Keypair, PUBLIC_KEY_LENGTH};
+
+    let keypair = Keypair::generate(&mut OsRng);
+    let pubkey = keypair.public;
+    assert_eq!(pubkey.fast_size(), PUBLIC_KEY_LENGTH);
+
+    let encoded = pubkey.encode().unwrap();
+    assert_eq!(encoded, pubkey.as_bytes());
+
+    let decoded = PublicKey::decode(&encoded).unwrap();
+    assert_eq!(decoded, pubkey);
+}
+
+#[cfg(test)]
+#[test]
+fn signature() {
+    use rand::rngs::OsRng;
+    use ed25519::{Keypair, Signer, SIGNATURE_LENGTH};
+
+    let keypair = Keypair::generate(&mut OsRng);
+    let msg = [0, 1, 2, 3, 4, 5, 6, 7];
+    let signature = keypair.sign(&msg);
+    assert_eq!(signature.fast_size(), SIGNATURE_LENGTH);
+
+    let encoded = signature.encode().unwrap();
+    assert_eq!(encoded, signature.to_bytes());
+
+    let decoded = Signature::decode(&encoded).unwrap();
+    assert_eq!(decoded, signature);
+}
