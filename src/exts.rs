@@ -21,3 +21,6 @@ mod net;
 
 #[cfg(feature = "set")]
 mod set;
+
+#[cfg(feature = "vec")]
+mod vec;
