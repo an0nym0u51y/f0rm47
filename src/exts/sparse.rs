@@ -10,49 +10,42 @@
  * │                                          Imports                                           │ *
 \* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
-use cfg_if::cfg_if;
+use crate::{Decode, DecodeRef, Encode};
+use sparse::Proof;
+use std::io::{self, Read, Write};
 
 /* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
- * │                                       cfg_if! { .. }                                       │ *
+ * │                                 impl {En,De}code for Proof                                 │ *
 \* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
-cfg_if! {
-    if #[cfg(feature = "chrono")] {
-        mod chrono;
+impl Encode for Proof {
+    type Error = io::Error;
+
+    fn fast_size(&self) -> usize {
+        Proof::size(self)
+    }
+
+    fn encode_into<W: Write>(&self, writer: W) -> Result<(), Self::Error> {
+        self.as_bytes().encode_into(writer)
     }
 }
 
-cfg_if! {
-    if #[cfg(feature = "collections")] {
-        mod deque;
-        mod heap;
-        mod list;
-        mod map;
-        mod set;
-        mod vec;
+impl Decode for Proof {
+    fn decode_with_len(buf: &[u8]) -> Result<(Self, usize), Self::Error> {
+        let (buf, read) = <[u8]>::decode_ref_with_len(buf)?;
+        if let Ok(proof) = Proof::from_bytes(buf) {
+            Ok((proof, read))
+        } else {
+            Err(io::Error::new(io::ErrorKind::InvalidData, "invalid proof data"))
+        }
     }
-}
 
-cfg_if! {
-    if #[cfg(feature = "ed25519")] {
-        mod ed25519;
-    }
-}
-
-cfg_if! {
-    if #[cfg(feature = "net")] {
-        mod net;
-    }
-}
-
-cfg_if! {
-    if #[cfg(feature = "pow")] {
-        mod pow;
-    }
-}
-
-cfg_if! {
-    if #[cfg(feature = "sparse")] {
-        mod sparse;
+    fn decode_with_len_from<R: Read>(reader: R) -> Result<(Self, usize), Self::Error> {
+        let (buf, read) = Vec::<u8>::decode_with_len_from(reader)?;
+        if let Ok(proof) = Proof::from_bytes(&buf) {
+            Ok((proof, read))
+        } else {
+            Err(io::Error::new(io::ErrorKind::InvalidData, "invalid proof data"))
+        }
     }
 }
