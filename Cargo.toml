@@ -14,5 +14,6 @@ edition = "2018"
 publish = false
 
 [features]
-default = ["collections"]
+default = ["collections", "net"]
 collections = []
+net = []

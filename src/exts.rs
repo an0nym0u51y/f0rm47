@@ -12,3 +12,6 @@
 
 #[cfg(feature = "collections")]
 mod collections;
+
+#[cfg(feature = "net")]
+mod net;
