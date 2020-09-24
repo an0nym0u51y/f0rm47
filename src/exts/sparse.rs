@@ -56,7 +56,7 @@ impl Decode for Proof {
 
 #[cfg(test)]
 #[test]
-fn sparse_proof() {
+fn proof() {
     use sparse::{blake3, Tree};
 
     let foo = blake3::hash(b"foo");

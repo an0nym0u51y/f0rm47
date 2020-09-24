@@ -58,11 +58,12 @@ impl Decode for Proofs {
 
 #[cfg(test)]
 #[test]
-fn pow_proofs() {
+fn proofs() {
     use pow::Tree;
 
     let tree = Tree::new("foobar", 8);
     let proofs = tree.gen_proofs_with(64);
+    assert_eq!(proofs.fast_size(), "foobar".len() + 8 + proofs.as_nodes().len() * 40);
 
     let encoded = proofs.encode().unwrap();
     let decoded = Proofs::decode(&encoded).unwrap();
