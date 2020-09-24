@@ -44,10 +44,29 @@ impl Encode for Proofs {
 impl Decode for Proofs {
     fn decode_with_len_from<R: Read>(mut reader: R) -> Result<(Self, usize), Self::Error> {
         let (desc, read1) = Vec::<u8>::decode_with_len_from(&mut reader)?;
-        let (levels, read2) = usize::decode_with_len_from(&mut reader)?;
-        let (proofs, read3) = usize::decode_with_len_from(&mut reader)?;
+        let (levels, read2) = u16::decode_with_len_from(&mut reader)?;
+        let (proofs, read3) = u16::decode_with_len_from(&mut reader)?;
         let (nodes, read4) = BTreeMap::<usize, [u8; 32]>::decode_with_len_from(&mut reader)?;
 
         Ok((Proofs::new(desc, levels as usize, proofs as usize, nodes), read1 + read2 + read3 + read4))
     }
+}
+
+/* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
+ * │                                          #[test]                                           │ *
+\* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
+
+#[cfg(test)]
+#[test]
+fn pow_proofs() {
+    use pow::Tree;
+
+    let tree = Tree::new("foobar", 8);
+    let proofs = tree.gen_proofs_with(64);
+
+    let encoded = proofs.encode().unwrap();
+    let decoded = Proofs::decode(&encoded).unwrap();
+    assert!(decoded.verify().is_ok());
+    assert_eq!(decoded.levels(), 8);
+    assert_eq!(decoded.proofs(), 64);
 }
