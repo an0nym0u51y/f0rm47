@@ -12,3 +12,7 @@ license = "MPL-2.0"
 authors = ["Matthieu Le brazidec (r3v2d0g) <r3v2d0g@jesus.gg>"]
 edition = "2018"
 publish = false
+
+[features]
+default = ["collections"]
+collections = []

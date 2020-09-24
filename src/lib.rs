@@ -16,6 +16,8 @@
  * │                                          Imports                                           │ *
 \* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
+mod exts;
+
 use core::mem;
 use std::io::{self, Read, Write};
 
@@ -137,6 +139,10 @@ where
     type Error = T::Error;
 
     default fn size(&self) -> Result<usize, Self::Error> {
+        if self.len() > u16::MAX as usize {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "buf.len() > u16::MAX").into());
+        }
+
         let mut size = (self.len() as u16).fast_size();
         for elem in self {
             size += elem.size()?;
