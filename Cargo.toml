@@ -15,7 +15,8 @@ publish = false
 
 [features]
 default = ["collections", "net"]
-collections = ["map", "set"]
+collections = ["list", "map", "set"]
+list = []
 map = []
 net = []
 set = []
