@@ -64,16 +64,16 @@ where
     T: Decode,
     T::Error: From<io::Error>,
 {
-    default fn decode_with_len(buf: &[u8]) -> Result<(Self, usize), Self::Error> {
-        Self::decode_with_len_from(buf)
+    default fn decode_with_read(buf: &[u8]) -> Result<(Self, usize), Self::Error> {
+        Self::decode_with_read_from(buf)
     }
 
-    default fn decode_with_len_from<R: Read>(mut reader: R) -> Result<(Self, usize), Self::Error> {
-        let (len, mut read) = u16::decode_with_len_from(&mut reader)?;
+    default fn decode_with_read_from<R: Read>(mut reader: R) -> Result<(Self, usize), Self::Error> {
+        let (len, mut read) = u16::decode_with_read_from(&mut reader)?;
         let mut elems = Vec::with_capacity(len as usize);
 
         for _ in 0..len {
-            let (elem, readb) = T::decode_with_len_from(&mut reader)?;
+            let (elem, readb) = T::decode_with_read_from(&mut reader)?;
             elems.push(elem);
             read += readb;
         }
@@ -101,13 +101,13 @@ impl Encode for Vec<u8> {
 }
 
 impl Decode for Vec<u8> {
-    fn decode_with_len(buf: &[u8]) -> Result<(Self, usize), Self::Error> {
-        let (buf, read) = <[u8]>::decode_ref_with_len(buf)?;
+    fn decode_with_read(buf: &[u8]) -> Result<(Self, usize), Self::Error> {
+        let (buf, read) = <[u8]>::decode_ref_with_read(buf)?;
         Ok((buf.to_vec(), read))
     }
 
-    fn decode_with_len_from<R: Read>(mut reader: R) -> Result<(Self, usize), Self::Error> {
-        let (len, read) = u16::decode_with_len_from(&mut reader)?;
+    fn decode_with_read_from<R: Read>(mut reader: R) -> Result<(Self, usize), Self::Error> {
+        let (len, read) = u16::decode_with_read_from(&mut reader)?;
         let mut data = vec![0; len as usize];
         reader.read_exact(&mut data)?;
 

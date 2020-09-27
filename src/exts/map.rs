@@ -75,15 +75,15 @@ where
     V: Encode<Error = E> + Decode,
     E: From<io::Error>,
 {
-    fn decode_with_len_from<R: Read>(mut reader: R) -> Result<(Self, usize), Self::Error> {
-        let (len, mut read) = u16::decode_with_len_from(&mut reader)?;
+    fn decode_with_read_from<R: Read>(mut reader: R) -> Result<(Self, usize), Self::Error> {
+        let (len, mut read) = u16::decode_with_read_from(&mut reader)?;
 
         let mut map = BTreeMap::new();
         for _ in 0..len {
-            let (key, readb) = K::decode_with_len_from(&mut reader)?;
+            let (key, readb) = K::decode_with_read_from(&mut reader)?;
             read += readb;
 
-            let (value, readb) = V::decode_with_len_from(&mut reader)?;
+            let (value, readb) = V::decode_with_read_from(&mut reader)?;
             read += readb;
 
             map.insert(key, value);
@@ -153,15 +153,15 @@ where
     V: Encode<Error = E> + Decode,
     E: From<io::Error>,
 {
-    fn decode_with_len_from<R: Read>(mut reader: R) -> Result<(Self, usize), Self::Error> {
-        let (len, mut read) = u16::decode_with_len_from(&mut reader)?;
+    fn decode_with_read_from<R: Read>(mut reader: R) -> Result<(Self, usize), Self::Error> {
+        let (len, mut read) = u16::decode_with_read_from(&mut reader)?;
 
         let mut map = HashMap::with_capacity(len as usize);
         for _ in 0..len {
-            let (key, readb) = K::decode_with_len_from(&mut reader)?;
+            let (key, readb) = K::decode_with_read_from(&mut reader)?;
             read += readb;
 
-            let (value, readb) = V::decode_with_len_from(&mut reader)?;
+            let (value, readb) = V::decode_with_read_from(&mut reader)?;
             read += readb;
 
             map.insert(key, value);

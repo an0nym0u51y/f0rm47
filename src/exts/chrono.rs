@@ -31,8 +31,8 @@ impl Encode for DateTime<Utc> {
 }
 
 impl Decode for DateTime<Utc> {
-    fn decode_with_len_from<R: Read>(reader: R) -> Result<(Self, usize), Self::Error> {
-        let (datetime, len) = NaiveDateTime::decode_with_len_from(reader)?;
+    fn decode_with_read_from<R: Read>(reader: R) -> Result<(Self, usize), Self::Error> {
+        let (datetime, len) = NaiveDateTime::decode_with_read_from(reader)?;
         Ok((Self::from_utc(datetime, Utc), len))
     }
 }
@@ -55,9 +55,9 @@ impl Encode for NaiveDateTime {
 }
 
 impl Decode for NaiveDateTime {
-    fn decode_with_len_from<R: Read>(mut reader: R) -> Result<(Self, usize), Self::Error> {
-        let (date, read1) = NaiveDate::decode_with_len_from(&mut reader)?;
-        let (time, read2) = NaiveTime::decode_with_len_from(&mut reader)?;
+    fn decode_with_read_from<R: Read>(mut reader: R) -> Result<(Self, usize), Self::Error> {
+        let (date, read1) = NaiveDate::decode_with_read_from(&mut reader)?;
+        let (time, read2) = NaiveTime::decode_with_read_from(&mut reader)?;
         Ok((Self::new(date, time), read1 + read2))
     }
 }
@@ -79,8 +79,8 @@ impl Encode for Date<Utc> {
 }
 
 impl Decode for Date<Utc> {
-    fn decode_with_len_from<R: Read>(reader: R) -> Result<(Self, usize), Self::Error> {
-        let (date, len) = NaiveDate::decode_with_len_from(reader)?;
+    fn decode_with_read_from<R: Read>(reader: R) -> Result<(Self, usize), Self::Error> {
+        let (date, len) = NaiveDate::decode_with_read_from(reader)?;
         Ok((Self::from_utc(date, Utc), len))
     }
 }
@@ -102,13 +102,13 @@ impl Encode for NaiveDate {
 }
 
 impl Decode for NaiveDate {
-    fn decode_with_len(buf: &[u8]) -> Result<(Self, usize), Self::Error> {
-        let (days, len) = i32::decode_with_len(buf)?;
+    fn decode_with_read(buf: &[u8]) -> Result<(Self, usize), Self::Error> {
+        let (days, len) = i32::decode_with_read(buf)?;
         Ok((Self::from_num_days_from_ce(days), len))
     }
 
-    fn decode_with_len_from<R: Read>(reader: R) -> Result<(Self, usize), Self::Error> {
-        let (days, len) = i32::decode_with_len_from(reader)?;
+    fn decode_with_read_from<R: Read>(reader: R) -> Result<(Self, usize), Self::Error> {
+        let (days, len) = i32::decode_with_read_from(reader)?;
         Ok((Self::from_num_days_from_ce(days), len))
     }
 }
@@ -130,13 +130,13 @@ impl Encode for NaiveTime {
 }
 
 impl Decode for NaiveTime {
-    fn decode_with_len(buf: &[u8]) -> Result<(Self, usize), Self::Error> {
-        let (secs, len) = u32::decode_with_len(buf)?;
+    fn decode_with_read(buf: &[u8]) -> Result<(Self, usize), Self::Error> {
+        let (secs, len) = u32::decode_with_read(buf)?;
         Ok((Self::from_num_seconds_from_midnight(secs, 0), len))
     }
 
-    fn decode_with_len_from<R: Read>(reader: R) -> Result<(Self, usize), Self::Error> {
-        let (secs, len) = u32::decode_with_len_from(reader)?;
+    fn decode_with_read_from<R: Read>(reader: R) -> Result<(Self, usize), Self::Error> {
+        let (secs, len) = u32::decode_with_read_from(reader)?;
         Ok((Self::from_num_seconds_from_midnight(secs, 0), len))
     }
 }

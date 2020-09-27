@@ -65,12 +65,12 @@ where
     T: Decode,
     T::Error: From<io::Error>,
 {
-    fn decode_with_len_from<R: Read>(mut reader: R) -> Result<(Self, usize), Self::Error> {
-        let (len, mut read) = u16::decode_with_len_from(&mut reader)?;
+    fn decode_with_read_from<R: Read>(mut reader: R) -> Result<(Self, usize), Self::Error> {
+        let (len, mut read) = u16::decode_with_read_from(&mut reader)?;
         let mut elems = VecDeque::with_capacity(len as usize);
 
         for _ in 0..len {
-            let (elem, readb) = T::decode_with_len_from(&mut reader)?;
+            let (elem, readb) = T::decode_with_read_from(&mut reader)?;
             elems.push_back(elem);
             read += readb;
         }

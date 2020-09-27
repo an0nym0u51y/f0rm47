@@ -22,7 +22,7 @@ use core::mem;
 use std::io::{self, Read, Write};
 
 /* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
- * │                                         Interfaces                                         │ *
+ * │                                        trait Encode                                        │ *
 \* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
 pub trait Encode {
@@ -44,28 +44,32 @@ pub trait Encode {
     fn encode_into<W: Write>(&self, writer: W) -> Result<(), Self::Error>;
 }
 
+/* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
+ * │                                     trait Decode{,Ref}                                     │ *
+\* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
+
 pub trait Decode: Encode + Sized {
     fn decode(buf: &[u8]) -> Result<Self, Self::Error> {
-        Ok(Self::decode_with_len(buf)?.0)
+        Ok(Self::decode_with_read(buf)?.0)
     }
 
     fn decode_from<R: Read>(reader: R) -> Result<Self, Self::Error> {
-        Ok(Self::decode_with_len_from(reader)?.0)
+        Ok(Self::decode_with_read_from(reader)?.0)
     }
 
-    fn decode_with_len(buf: &[u8]) -> Result<(Self, usize), Self::Error> {
-        Self::decode_with_len_from(buf)
+    fn decode_with_read(buf: &[u8]) -> Result<(Self, usize), Self::Error> {
+        Self::decode_with_read_from(buf)
     }
 
-    fn decode_with_len_from<R: Read>(reader: R) -> Result<(Self, usize), Self::Error>;
+    fn decode_with_read_from<R: Read>(reader: R) -> Result<(Self, usize), Self::Error>;
 }
 
 pub trait DecodeRef: Encode {
     fn decode_ref(buf: &[u8]) -> Result<&Self, Self::Error> {
-        Ok(Self::decode_ref_with_len(buf)?.0)
+        Ok(Self::decode_ref_with_read(buf)?.0)
     }
 
-    fn decode_ref_with_len(buf: &[u8]) -> Result<(&Self, usize), Self::Error>;
+    fn decode_ref_with_read(buf: &[u8]) -> Result<(&Self, usize), Self::Error>;
 }
 
 /* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
@@ -125,13 +129,13 @@ impl<T: Decode + ?Sized> Decode for Box<T> {
         T::decode_from(reader).map(Box::new)
     }
 
-    fn decode_with_len(buf: &[u8]) -> Result<(Self, usize), Self::Error> {
-        let (val, len) = T::decode_with_len(buf)?;
+    fn decode_with_read(buf: &[u8]) -> Result<(Self, usize), Self::Error> {
+        let (val, len) = T::decode_with_read(buf)?;
         Ok((Box::new(val), len))
     }
 
-    fn decode_with_len_from<R: Read>(reader: R) -> Result<(Self, usize), Self::Error> {
-        let (val, len) = T::decode_with_len_from(reader)?;
+    fn decode_with_read_from<R: Read>(reader: R) -> Result<(Self, usize), Self::Error> {
+        let (val, len) = T::decode_with_read_from(reader)?;
         Ok((Box::new(val), len))
     }
 }
@@ -177,10 +181,10 @@ impl<T: Decode> Decode for Option<T>
 where
     T::Error: From<io::Error>,
 {
-    fn decode_with_len_from<R: Read>(mut reader: R) -> Result<(Self, usize), Self::Error> {
-        match bool::decode_with_len_from(&mut reader)? {
+    fn decode_with_read_from<R: Read>(mut reader: R) -> Result<(Self, usize), Self::Error> {
+        match bool::decode_with_read_from(&mut reader)? {
             (true, read1) => {
-                let (val, read2) = T::decode_with_len_from(reader)?;
+                let (val, read2) = T::decode_with_read_from(reader)?;
                 Ok((Some(val), read1 + read2))
             }
             (false, read) => Ok((None, read))
@@ -207,12 +211,12 @@ macro_rules! primitive {
         }
 
         impl Decode for $primitive {
-            fn decode_with_len(buf: &[u8]) -> Result<(Self, usize), Self::Error> {
+            fn decode_with_read(buf: &[u8]) -> Result<(Self, usize), Self::Error> {
                 let bytes = <[u8; mem::size_of::<$primitive>()]>::decode(buf)?;
                 Ok((Self::from_le_bytes(bytes), mem::size_of::<$primitive>()))
             }
 
-            fn decode_with_len_from<R: Read>(reader: R) -> Result<(Self, usize), Self::Error> {
+            fn decode_with_read_from<R: Read>(reader: R) -> Result<(Self, usize), Self::Error> {
                 let bytes = <[u8; mem::size_of::<$primitive>()]>::decode_from(reader)?;
                 Ok((Self::from_le_bytes(bytes), mem::size_of::<$primitive>()))
             }
@@ -247,11 +251,11 @@ macro_rules! tuple {
             $($name: Encode<Error = Err> + Decode,)+
         {
             #[allow(clippy::eval_order_dependence)]
-            fn decode_with_len_from<R: Read>(mut reader: R) -> Result<(Self, usize), Self::Error> {
+            fn decode_with_read_from<R: Read>(mut reader: R) -> Result<(Self, usize), Self::Error> {
                 let mut len = 0;
                 let val = (
                     $({
-                        let (val, read) = <$name>::decode_with_len_from(&mut reader)?;
+                        let (val, read) = <$name>::decode_with_read_from(&mut reader)?;
                         len += read;
                         val
                     },)+
@@ -321,8 +325,8 @@ impl Encode for bool {
 }
 
 impl Decode for bool {
-    fn decode_with_len(buf: &[u8]) -> Result<(Self, usize), Self::Error> {
-        let (val, len) = u8::decode_with_len(buf)?;
+    fn decode_with_read(buf: &[u8]) -> Result<(Self, usize), Self::Error> {
+        let (val, len) = u8::decode_with_read(buf)?;
         match val {
             0 => Ok((false, len)),
             1 => Ok((true, len)),
@@ -330,8 +334,8 @@ impl Decode for bool {
         }
     }
 
-    fn decode_with_len_from<R: Read>(reader: R) -> Result<(Self, usize), Self::Error> {
-        let (val, len) = u8::decode_with_len_from(reader)?;
+    fn decode_with_read_from<R: Read>(reader: R) -> Result<(Self, usize), Self::Error> {
+        let (val, len) = u8::decode_with_read_from(reader)?;
         match val {
             0 => Ok((false, len)),
             1 => Ok((true, len)),
@@ -369,25 +373,25 @@ impl Encode for isize {
 }
 
 impl Decode for usize {
-    fn decode_with_len(buf: &[u8]) -> Result<(Self, usize), Self::Error> {
-        let (num, len) = u64::decode_with_len(buf)?;
+    fn decode_with_read(buf: &[u8]) -> Result<(Self, usize), Self::Error> {
+        let (num, len) = u64::decode_with_read(buf)?;
         Ok((num as usize, len))
     }
 
-    fn decode_with_len_from<R: Read>(reader: R) -> Result<(Self, usize), Self::Error> {
-        let (num, len) = u64::decode_with_len_from(reader)?;
+    fn decode_with_read_from<R: Read>(reader: R) -> Result<(Self, usize), Self::Error> {
+        let (num, len) = u64::decode_with_read_from(reader)?;
         Ok((num as usize, len))
     }
 }
 
 impl Decode for isize {
-    fn decode_with_len(buf: &[u8]) -> Result<(Self, usize), Self::Error> {
-        let (num, len) = i64::decode_with_len(buf)?;
+    fn decode_with_read(buf: &[u8]) -> Result<(Self, usize), Self::Error> {
+        let (num, len) = i64::decode_with_read(buf)?;
         Ok((num as isize, len))
     }
 
-    fn decode_with_len_from<R: Read>(reader: R) -> Result<(Self, usize), Self::Error> {
-        let (num, len) = i64::decode_with_len_from(reader)?;
+    fn decode_with_read_from<R: Read>(reader: R) -> Result<(Self, usize), Self::Error> {
+        let (num, len) = i64::decode_with_read_from(reader)?;
         Ok((num as isize, len))
     }
 }
@@ -409,7 +413,7 @@ impl<const LEN: usize> Encode for [u8; LEN] {
 }
 
 impl<const LEN: usize> Decode for [u8; LEN] {
-    fn decode_with_len(buf: &[u8]) -> Result<(Self, usize), Self::Error> {
+    fn decode_with_read(buf: &[u8]) -> Result<(Self, usize), Self::Error> {
         if buf.len() < LEN {
             Err(io::Error::new(io::ErrorKind::UnexpectedEof, "not enough data"))
         } else {
@@ -420,7 +424,7 @@ impl<const LEN: usize> Decode for [u8; LEN] {
         }
     }
 
-    fn decode_with_len_from<R: Read>(mut reader: R) -> Result<(Self, usize), Self::Error> {
+    fn decode_with_read_from<R: Read>(mut reader: R) -> Result<(Self, usize), Self::Error> {
         let mut bytes = [0; LEN];
         reader.read_exact(&mut bytes)?;
 
@@ -450,8 +454,8 @@ impl Encode for [u8] {
 }
 
 impl DecodeRef for [u8] {
-    fn decode_ref_with_len(buf: &[u8]) -> Result<(&Self, usize), Self::Error> {
-        let (len, read) = u16::decode_with_len(buf)?;
+    fn decode_ref_with_read(buf: &[u8]) -> Result<(&Self, usize), Self::Error> {
+        let (len, read) = u16::decode_with_read(buf)?;
         let len = len as usize;
 
         if buf.len() < len + read {

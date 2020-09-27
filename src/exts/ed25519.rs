@@ -31,8 +31,8 @@ impl Encode for PublicKey {
 }
 
 impl Decode for PublicKey {
-    fn decode_with_len_from<R: Read>(reader: R) -> Result<(Self, usize), Self::Error> {
-        let (bytes, read) = <[u8; 32]>::decode_with_len_from(reader)?;
+    fn decode_with_read_from<R: Read>(reader: R) -> Result<(Self, usize), Self::Error> {
+        let (bytes, read) = <[u8; 32]>::decode_with_read_from(reader)?;
         if let Ok(key) = PublicKey::from_bytes(&bytes) {
             Ok((key, read))
         } else {
@@ -58,8 +58,8 @@ impl Encode for Signature {
 }
 
 impl Decode for Signature {
-    fn decode_with_len_from<R: Read>(reader: R) -> Result<(Self, usize), Self::Error> {
-        let (bytes, read) = <[u8; 64]>::decode_with_len_from(reader)?;
+    fn decode_with_read_from<R: Read>(reader: R) -> Result<(Self, usize), Self::Error> {
+        let (bytes, read) = <[u8; 64]>::decode_with_read_from(reader)?;
         Ok((Signature::from(bytes), read))
     }
 }

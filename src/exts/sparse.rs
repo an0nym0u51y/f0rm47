@@ -31,8 +31,8 @@ impl Encode for Proof {
 }
 
 impl Decode for Proof {
-    fn decode_with_len(buf: &[u8]) -> Result<(Self, usize), Self::Error> {
-        let (buf, read) = <[u8]>::decode_ref_with_len(buf)?;
+    fn decode_with_read(buf: &[u8]) -> Result<(Self, usize), Self::Error> {
+        let (buf, read) = <[u8]>::decode_ref_with_read(buf)?;
         if let Ok(proof) = Proof::from_bytes(buf) {
             Ok((proof, read))
         } else {
@@ -40,8 +40,8 @@ impl Decode for Proof {
         }
     }
 
-    fn decode_with_len_from<R: Read>(reader: R) -> Result<(Self, usize), Self::Error> {
-        let (buf, read) = Vec::<u8>::decode_with_len_from(reader)?;
+    fn decode_with_read_from<R: Read>(reader: R) -> Result<(Self, usize), Self::Error> {
+        let (buf, read) = Vec::<u8>::decode_with_read_from(reader)?;
         if let Ok(proof) = Proof::from_bytes(&buf) {
             Ok((proof, read))
         } else {
