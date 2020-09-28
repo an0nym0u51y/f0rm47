@@ -31,6 +31,15 @@ impl Encode for PublicKey {
 }
 
 impl Decode for PublicKey {
+    fn decode_with_read(buf: &[u8]) -> Result<(Self, usize), Self::Error> {
+        let (bytes, read) = <[u8; 32]>::decode_with_read(buf)?;
+        if let Ok(key) = PublicKey::from_bytes(&bytes) {
+            Ok((key, read))
+        } else {
+            Err(io::Error::new(io::ErrorKind::InvalidData, "invalid public key"))
+        }
+    }
+
     fn decode_with_read_from<R: Read>(reader: R) -> Result<(Self, usize), Self::Error> {
         let (bytes, read) = <[u8; 32]>::decode_with_read_from(reader)?;
         if let Ok(key) = PublicKey::from_bytes(&bytes) {
