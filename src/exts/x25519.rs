@@ -10,55 +10,34 @@
  * │                                          Imports                                           │ *
 \* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
-use cfg_if::cfg_if;
+use crate::{Decode, Encode};
+use std::io::{self, Read, Write};
+use x25519::PublicKey;
 
 /* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
- * │                                       cfg_if! { .. }                                       │ *
+ * │                               impl {En,De}code for PublicKey                               │ *
 \* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
-cfg_if! {
-    if #[cfg(feature = "chrono")] {
-        mod chrono;
+impl Encode for PublicKey {
+    type Error = io::Error;
+
+    fn fast_size(&self) -> usize {
+        self.to_bytes().fast_size()
+    }
+
+    fn encode_into<W: Write>(&self, writer: W) -> Result<(), Self::Error> {
+        self.to_bytes().encode_into(writer)
     }
 }
 
-cfg_if! {
-    if #[cfg(feature = "collections")] {
-        mod deque;
-        mod heap;
-        mod list;
-        mod map;
-        mod set;
-        mod vec;
+impl Decode for PublicKey {
+    fn decode_with_read(buf: &[u8]) -> Result<(Self, usize), Self::Error> {
+        let (bytes, read) = <[u8; 32]>::decode_with_read(buf)?;
+        Ok((PublicKey::from(bytes), read))
     }
-}
 
-cfg_if! {
-    if #[cfg(feature = "ed25519")] {
-        mod ed25519;
-    }
-}
-
-cfg_if! {
-    if #[cfg(feature = "net")] {
-        mod net;
-    }
-}
-
-cfg_if! {
-    if #[cfg(feature = "pow")] {
-        mod pow;
-    }
-}
-
-cfg_if! {
-    if #[cfg(feature = "sparse")] {
-        mod sparse;
-    }
-}
-
-cfg_if! {
-    if #[cfg(feature = "x25519")] {
-        mod x25519;
+    fn decode_with_read_from<R: Read>(reader: R) -> Result<(Self, usize), Self::Error> {
+        let (bytes, read) = <[u8; 32]>::decode_with_read_from(reader)?;
+        Ok((PublicKey::from(bytes), read))
     }
 }
