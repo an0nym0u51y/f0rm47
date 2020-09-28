@@ -45,6 +45,13 @@ where
         }
     }
 
+    default fn encode(&self) -> Result<Vec<u8>, Self::Error> {
+        let mut buf = Vec::with_capacity(self.size()?);
+        self.encode_into(&mut buf)?;
+
+        Ok(buf)
+    }
+
     default fn encode_into<W: Write>(&self, mut writer: W) -> Result<(), Self::Error> {
         if self.len() > u16::MAX as usize {
             Err(io::Error::new(io::ErrorKind::InvalidInput, "vec.len() > u16::MAX").into())
@@ -93,6 +100,10 @@ impl Encode for Vec<u8> {
 
     fn fast_size(&self) -> usize {
         self.as_slice().fast_size()
+    }
+
+    fn encode(&self) -> Result<Vec<u8>, Self::Error> {
+        Ok(self.clone())
     }
 
     fn encode_into<W: Write>(&self, writer: W) -> Result<(), Self::Error> {
