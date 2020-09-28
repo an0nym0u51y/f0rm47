@@ -10,7 +10,7 @@
  * │                                       Configuration                                        │ *
 \* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
-#![feature(min_const_generics, min_specialization)]
+#![feature(array_map, maybe_uninit_uninit_array, min_const_generics, min_specialization)]
 
 /* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
  * │                                          Imports                                           │ *
@@ -18,7 +18,7 @@
 
 mod exts;
 
-use core::mem;
+use core::mem::{self, MaybeUninit};
 use std::io::{self, Read, Write};
 
 /* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
@@ -397,14 +397,81 @@ impl Decode for isize {
 }
 
 /* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
+ * │                                impl {En,De}code for [T; _]                                 │ *
+\* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
+
+impl<T, const LEN: usize> Encode for [T; LEN]
+where
+    T: Encode,
+{
+    type Error = T::Error;
+
+    default fn size(&self) -> Result<usize, Self::Error> {
+        let mut size = 0;
+        for elem in self {
+            size += elem.size()?;
+        }
+
+        Ok(size)
+    }
+
+    default fn fast_size(&self) -> usize {
+        self[0].fast_size() * LEN
+    }
+
+    default fn encode(&self) -> Result<Vec<u8>, Self::Error> {
+        let mut buf = Vec::with_capacity(self.size()?);
+        self.encode_into(&mut buf)?;
+
+        Ok(buf)
+    }
+
+    default fn encode_into<W: Write>(&self, mut writer: W) -> Result<(), Self::Error> {
+        for elem in self {
+            elem.encode_into(&mut writer)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl<T, const LEN: usize> Decode for [T; LEN]
+where
+    T: Decode,
+{
+    default fn decode_with_read(buf: &[u8]) -> Result<(Self, usize), Self::Error> {
+        Self::decode_with_read_from(buf)
+    }
+
+    default fn decode_with_read_from<R: Read>(mut reader: R) -> Result<(Self, usize), Self::Error> {
+        let mut read = 0;
+        let mut arr = MaybeUninit::uninit_array();
+
+        for elem in &mut arr[..] {
+            let (decoded, readb) = T::decode_with_read_from(&mut reader)?;
+            *elem = MaybeUninit::new(decoded);
+            read += readb;
+        }
+
+        Ok((arr.map(|elem| unsafe { elem.assume_init() }), read))
+    }
+}
+
+/* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
  * │                                impl {En,De}code for [u8; _]                                │ *
 \* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
 impl<const LEN: usize> Encode for [u8; LEN] {
-    type Error = io::Error;
+    fn size(&self) -> Result<usize, Self::Error> {
+        Ok(LEN)
+    }
 
     fn fast_size(&self) -> usize {
         LEN
+    }
+
+    fn encode(&self) -> Result<Vec<u8>, Self::Error> {
+        Ok(self.to_vec())
     }
 
     fn encode_into<W: Write>(&self, mut writer: W) -> Result<(), Self::Error> {
@@ -433,7 +500,7 @@ impl<const LEN: usize> Decode for [u8; LEN] {
 }
 
 /* ┌────────────────────────────────────────────────────────────────────────────────────────────┐ *\
- * │                              impl {Encode,DecodeRef} for [u8}                              │ *
+ * │                              impl {Encode,DecodeRef} for [u8]                              │ *
 \* └────────────────────────────────────────────────────────────────────────────────────────────┘ */
 
 impl Encode for [u8] {
